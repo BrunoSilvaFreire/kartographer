@@ -37,6 +37,35 @@ class FilesystemTasksTest {
     }
 
     @Test
+    fun testFileFilterIterableOptimization(@TempDir tempDir: Path) {
+        val fullyIncludedDir = Files.createDirectory(tempDir.resolve("fullyIncludedDir"))
+        Files.writeString(fullyIncludedDir.resolve("file1.txt"), "1")
+        Files.writeString(fullyIncludedDir.resolve("file2.txt"), "2")
+
+        val partiallyExcludedDir = Files.createDirectory(tempDir.resolve("partiallyExcludedDir"))
+        Files.writeString(partiallyExcludedDir.resolve("file3.txt"), "3")
+        Files.writeString(partiallyExcludedDir.resolve("excluded.txt"), "excluded")
+
+        // 1. Filter with no exclusions on fullyIncludedDir
+        val filter1 = FileFilter(
+            includes = listOf("fullyIncludedDir", "fullyIncludedDir/**"),
+            excludes = emptyList(),
+            baseDir = tempDir
+        )
+        val result1 = filter1.toList().map { tempDir.relativize(it).toString().replace('\\', '/') }
+        assertEquals(listOf("fullyIncludedDir"), result1)
+
+        // 2. Filter with a partial exclusion inside partiallyExcludedDir
+        val filter2 = FileFilter(
+            includes = listOf("partiallyExcludedDir", "partiallyExcludedDir/**"),
+            excludes = listOf("**/excluded.txt"),
+            baseDir = tempDir
+        )
+        val result2 = filter2.toList().map { tempDir.relativize(it).toString().replace('\\', '/') }
+        assertEquals(listOf("partiallyExcludedDir/file3.txt"), result2)
+    }
+
+    @Test
     fun testCopyTask(@TempDir tempDir: Path) = runBlocking {
         val srcDir = Files.createDirectory(tempDir.resolve("src"))
         val destDir = tempDir.resolve("dest")
