@@ -1,5 +1,8 @@
-package io.kartographer.core
+package io.kartographer.tasks
 
+import io.kartographer.core.ExecutionContext
+import io.kartographer.core.ExecutionResult
+import io.kartographer.core.Task
 import io.kartographer.local.LocalProcessExecutor
 
 open class DefaultTask(name: String) : Task(name) {

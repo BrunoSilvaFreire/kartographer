@@ -19,23 +19,27 @@ import java.nio.file.Paths
 
 class KartographerCommand : CliktCommand(name = "kartographer", invokeWithoutSubcommand = false) {
     val pipelineClass by option("-p", "--pipeline", help = "Compiled pipeline class name to load")
-        .default("io.kartographer.example.BasicPipeline")
 
     override fun run() {
-        if (pipelineClass.endsWith(".kts")) {
-            echo("Error: Dynamic scripting (.kts) loading is a roadmap feature. Please use a compiled class name (e.g., 'io.kartographer.example.BasicPipeline') or see docs/scripting_roadmap.md.", err = true)
+        val pClass = pipelineClass ?: run {
+            echo("Error: Please specify the compiled pipeline class using -p or --pipeline.", err = true)
+            throw com.github.ajalt.clikt.core.ProgramResult(1)
+        }
+
+        if (pClass.endsWith(".kts")) {
+            echo("Error: Dynamic scripting (.kts) loading is a roadmap feature. Please use a compiled class name or see docs/scripting_roadmap.md.", err = true)
             throw com.github.ajalt.clikt.core.ProgramResult(1)
         }
 
         try {
             // Load and instantiate the compiled pipeline class to populate TaskRegistry
-            val clazz = Class.forName(pipelineClass)
+            val clazz = Class.forName(pClass)
             clazz.getDeclaredConstructor().newInstance()
         } catch (e: ClassNotFoundException) {
-            echo("Error: Pipeline class '$pipelineClass' not found. Ensure it is compiled and on classpath.", err = true)
+            echo("Error: Pipeline class '$pClass' not found. Ensure it is compiled and on classpath.", err = true)
             throw com.github.ajalt.clikt.core.ProgramResult(1)
         } catch (e: Exception) {
-            echo("Error loading pipeline class '$pipelineClass': ${e.localizedMessage}", err = true)
+            echo("Error loading pipeline class '$pClass': ${e.localizedMessage}", err = true)
             e.printStackTrace()
             throw com.github.ajalt.clikt.core.ProgramResult(1)
         }

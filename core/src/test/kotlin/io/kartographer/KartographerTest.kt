@@ -1,7 +1,7 @@
 package io.kartographer
 
-import io.kartographer.core.DefaultTask
-import io.kartographer.core.ExecTask
+import io.kartographer.tasks.DefaultTask
+import io.kartographer.tasks.ExecTask
 import io.kartographer.core.ExecutionContext
 import io.kartographer.core.ExecutionResult
 import io.kartographer.core.TopologyRequirement
@@ -16,7 +16,6 @@ import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import java.nio.file.Files
 import java.nio.file.Paths
 
 class KartographerTest {
