@@ -75,9 +75,35 @@ class ConcurrentScheduler(private val allTasks: Map<TaskId, Task>) {
                                         return@taskJob
                                     }
 
+                                    // Check if up-to-date
+                                    if (task.isUpToDate(context)) {
+                                        // Trigger callback to inform runner it is up-to-date
+                                        // We will pass an UpToDate flag or trigger onTaskSuccess
+                                        onTaskSuccess(task)
+                                        mutex.withLock {
+                                            completedTasks.add(task)
+                                            for (otherTask in executionSet) {
+                                                remainingDeps[otherTask]?.remove(task)
+                                            }
+                                        }
+                                        checkAndSpawnReady()
+                                        return@taskJob
+                                    }
+
                                     // Execute task
                                     when (val result = task.execute(context)) {
                                         is ExecutionResult.Success -> {
+                                            TaskStateStore.saveState(context, task)
+                                            onTaskSuccess(task)
+                                            mutex.withLock {
+                                                completedTasks.add(task)
+                                                for (otherTask in executionSet) {
+                                                    remainingDeps[otherTask]?.remove(task)
+                                                }
+                                            }
+                                            checkAndSpawnReady()
+                                        }
+                                        is ExecutionResult.UpToDate -> {
                                             onTaskSuccess(task)
                                             mutex.withLock {
                                                 completedTasks.add(task)

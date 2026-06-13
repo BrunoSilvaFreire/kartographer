@@ -130,6 +130,9 @@ class RunCommand : CliktCommand(name = "run", help = "Run a task and all its dep
             is ExecutionResult.Success -> {
                 echo("Pipeline run finished successfully.")
             }
+            is ExecutionResult.UpToDate -> {
+                echo("Pipeline run finished (up-to-date).")
+            }
             is ExecutionResult.Failure -> {
                 echo("Pipeline run failed.", err = true)
                 throw com.github.ajalt.clikt.core.ProgramResult(result.exitCode ?: 1)

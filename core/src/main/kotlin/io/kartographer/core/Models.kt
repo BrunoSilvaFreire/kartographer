@@ -70,6 +70,7 @@ data class ExecutionContext(
 
 sealed interface ExecutionResult {
     data object Success : ExecutionResult
+    data object UpToDate : ExecutionResult
     
     data class Failure(val error: Throwable, val exitCode: Int? = null) : ExecutionResult
 }
@@ -92,6 +93,88 @@ abstract class Task(val name: String) {
 
     protected fun <T> output(resolver: () -> T): Provider<T> {
         return TaskOutputProvider(this, resolver)
+    }
+
+    val upToDateChecks = mutableListOf<io.kartographer.core.scheduler.UpToDateCheck>()
+
+    val customFilesToTrack = mutableSetOf<String>()
+    val customPropertiesToTrack = mutableMapOf<String, () -> Any?>()
+
+    fun trackFile(path: String) {
+        customFilesToTrack.add(path)
+    }
+
+    fun trackProperty(name: String, provider: () -> Any?) {
+        customPropertiesToTrack[name] = provider
+    }
+
+    fun trackEnvVar(name: String) {
+        trackProperty("env:$name") { System.getenv(name) }
+    }
+
+    fun trackSystemProperty(name: String) {
+        trackProperty("sys:$name") { System.getProperty(name) }
+    }
+
+    fun upToDateWhen(check: io.kartographer.core.scheduler.UpToDateCheck) {
+        upToDateChecks.add(check)
+    }
+
+    fun upToDateWhenEnvMatches(vararg names: String) {
+        for (name in names) {
+            trackEnvVar(name)
+        }
+        upToDateWhen { context, task ->
+            val helpers = io.kartographer.core.scheduler.UpToDateHelpers
+            helpers.envVarsMatch(*names).isUpToDate(context, task)
+        }
+    }
+
+    fun upToDateWhenFilesMatch(vararg paths: String) {
+        for (path in paths) {
+            trackFile(path)
+        }
+        upToDateWhen { context, task ->
+            val helpers = io.kartographer.core.scheduler.UpToDateHelpers
+            helpers.customFilesMatch().isUpToDate(context, task)
+        }
+    }
+
+    fun upToDateWhenPropertyMatches(name: String, provider: () -> Any?) {
+        trackProperty(name, provider)
+        upToDateWhen { context, task ->
+            val helpers = io.kartographer.core.scheduler.UpToDateHelpers
+            helpers.customPropertiesMatch().isUpToDate(context, task)
+        }
+    }
+
+    fun upToDateWhenInputsNewerThanOutputs() {
+        upToDateWhen { context, task ->
+            val helpers = io.kartographer.core.scheduler.UpToDateHelpers
+            helpers.inputsOlderThanOutputs().isUpToDate(context, task)
+        }
+    }
+
+    suspend fun isUpToDate(context: ExecutionContext): Boolean {
+        if (upToDateChecks.isNotEmpty()) {
+            return upToDateChecks.all { it.isUpToDate(context, this) }
+        }
+
+        val hasDefaults = inputs.files.isNotEmpty() || inputs.dirs.isNotEmpty() ||
+                          outputs.files.isNotEmpty() || outputs.dirs.isNotEmpty() ||
+                          registeredProperties.isNotEmpty() ||
+                          customFilesToTrack.isNotEmpty() || customPropertiesToTrack.isNotEmpty()
+
+        if (hasDefaults) {
+            val helpers = io.kartographer.core.scheduler.UpToDateHelpers
+            return helpers.propertiesMatch().isUpToDate(context, this) &&
+                   helpers.inputsMatch().isUpToDate(context, this) &&
+                   helpers.outputsMatch().isUpToDate(context, this) &&
+                   helpers.customPropertiesMatch().isUpToDate(context, this) &&
+                   helpers.customFilesMatch().isUpToDate(context, this)
+        }
+
+        return false
     }
 
     fun dependsOn(vararg tasks: Task) {
