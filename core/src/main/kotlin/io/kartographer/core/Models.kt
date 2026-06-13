@@ -64,7 +64,8 @@ data class PlacementDecision(
 data class ExecutionContext(
     val projectDir: Path,
     val environment: Map<String, String> = System.getenv(),
-    val worker: Worker
+    val worker: Worker,
+    val variables: java.util.concurrent.ConcurrentHashMap<String, Any> = java.util.concurrent.ConcurrentHashMap()
 )
 
 sealed interface ExecutionResult {
@@ -80,6 +81,18 @@ abstract class Task(val name: String) {
     val inputs = TaskInputs()
     val outputs = TaskOutputs()
     val topologyRequirements = mutableListOf<TopologyRequirement>()
+
+    val registeredProperties = mutableListOf<Property<*>>()
+
+    protected fun <T> property(): Property<T> {
+        val prop = Property<T>()
+        registeredProperties.add(prop)
+        return prop
+    }
+
+    protected fun <T> output(resolver: () -> T): Provider<T> {
+        return TaskOutputProvider(this, resolver)
+    }
 
     fun dependsOn(vararg tasks: Task) {
         dependencyObjects.addAll(tasks)

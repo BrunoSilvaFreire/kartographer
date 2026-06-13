@@ -25,6 +25,13 @@ class DagScheduler(private val tasks: Map<TaskId, Task>) {
                 val depTask = tasks[depId] ?: throw MissingDependencyException(task.name, depName)
                 deps.add(depTask)
             }
+
+            // Resolve property-based implicit dependencies
+            for (prop in task.registeredProperties) {
+                prop.producingTask?.let { producer ->
+                    deps.add(producer)
+                }
+            }
             resolved[task] = deps
         }
         return resolved
