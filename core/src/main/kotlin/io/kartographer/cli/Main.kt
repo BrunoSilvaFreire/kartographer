@@ -99,19 +99,7 @@ class RunCommand : CliktCommand(name = "run", help = "Run a task and all its dep
             throw com.github.ajalt.clikt.core.ProgramResult(1)
         }
 
-        val scheduler = DagScheduler(tasks)
-        val executionOrder = try {
-            scheduler.getExecutionOrder()
-        } catch (e: Exception) {
-            echo("Error resolving execution order: ${e.localizedMessage}", err = true)
-            throw com.github.ajalt.clikt.core.ProgramResult(1)
-        }
-
-        // Filter executionOrder to execute only the target task and its transitive dependencies
-        val tasksToExecute = getTransitiveDependencies(targetTask) + targetTask
-        val orderedExecution = executionOrder.filter { it in tasksToExecute }
-
-        echo("Executing tasks: ${orderedExecution.joinToString(" -> ") { it.name }}")
+        val scheduler = io.kartographer.core.scheduler.ConcurrentScheduler(tasks)
 
         // Define a simple local worker for the MVP
         val worker = Worker(
@@ -127,24 +115,24 @@ class RunCommand : CliktCommand(name = "run", help = "Run a task and all its dep
             worker = worker
         )
 
-        for (task in orderedExecution) {
-            echo(">>> Running task '${task.name}'...")
-            
-            // Check topology placement requirements
-            val placementOk = checkTopology(task, worker)
-            if (!placementOk) {
-                echo("Error: Task '${task.name}' topology requirements not satisfied by worker.", err = true)
-                throw com.github.ajalt.clikt.core.ProgramResult(1)
+        val result = scheduler.execute(
+            targetTask = targetTask,
+            context = context,
+            checkTopology = { checkTopology(it, worker) },
+            onTaskStart = { echo("[INFO] [${it.name}] Started execution...") },
+            onTaskSuccess = { echo("[SUCCESS] [${it.name}] Completed successfully.") },
+            onTaskFailure = { task, err, exitCode ->
+                echo("[FAILURE] [${task.name}] Failed: ${err.localizedMessage}", err = true)
             }
+        )
 
-            when (val result = task.execute(context)) {
-                is ExecutionResult.Success -> {
-                    echo(">>> Task '${task.name}' finished successfully.")
-                }
-                is ExecutionResult.Failure -> {
-                    echo(">>> Task '${task.name}' failed: ${result.error.localizedMessage}", err = true)
-                    throw com.github.ajalt.clikt.core.ProgramResult(result.exitCode ?: 1)
-                }
+        when (result) {
+            is ExecutionResult.Success -> {
+                echo("Pipeline run finished successfully.")
+            }
+            is ExecutionResult.Failure -> {
+                echo("Pipeline run failed.", err = true)
+                throw com.github.ajalt.clikt.core.ProgramResult(result.exitCode ?: 1)
             }
         }
     }
