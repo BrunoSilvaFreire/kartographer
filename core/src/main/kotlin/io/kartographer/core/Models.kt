@@ -12,30 +12,34 @@ value class WorkerId(val value: String) {
     override fun toString() = value
 }
 
-class TaskInputs {
+abstract class TaskInputs {
     val files = mutableSetOf<String>()
     val dirs = mutableSetOf<String>()
-
-    fun file(path: String) {
-        files.add(path)
-    }
-
-    fun dir(path: String) {
-        dirs.add(path)
-    }
 }
 
-class TaskOutputs {
+class DefaultTaskInputs : TaskInputs()
+
+abstract class TaskOutputs {
     val files = mutableSetOf<String>()
     val dirs = mutableSetOf<String>()
+}
 
-    fun file(path: String) {
-        files.add(path)
-    }
+class DefaultTaskOutputs : TaskOutputs()
 
-    fun dir(path: String) {
-        dirs.add(path)
-    }
+fun TaskInputs.file(path: String) {
+    files.add(path)
+}
+
+fun TaskInputs.dir(path: String) {
+    dirs.add(path)
+}
+
+fun TaskOutputs.file(path: String) {
+    files.add(path)
+}
+
+fun TaskOutputs.dir(path: String) {
+    dirs.add(path)
 }
 
 sealed interface TopologyRequirement {
@@ -80,8 +84,8 @@ abstract class Task(val name: String) {
     val id: TaskId = TaskId(name)
     val dependencyObjects = mutableSetOf<Task>()
     val dependencyNames = mutableSetOf<String>()
-    val inputs = TaskInputs()
-    val outputs = TaskOutputs()
+    val inputs: TaskInputs = DefaultTaskInputs()
+    val outputs: TaskOutputs = DefaultTaskOutputs()
     val topologyRequirements = mutableListOf<TopologyRequirement>()
 
     val registeredProperties = mutableListOf<Property<*>>()
