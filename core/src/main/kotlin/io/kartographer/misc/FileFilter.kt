@@ -4,7 +4,11 @@ import java.nio.file.FileSystems
 import java.nio.file.Path
 import java.nio.file.Paths
 
-data class FilePaths(val paths: List<String> = emptyList())
+data class FilePaths(val paths: List<String> = emptyList()) : Iterable<Path> {
+    override fun iterator(): Iterator<Path> {
+        return paths.map { Paths.get(it) }.iterator()
+    }
+}
 
 class FileFilter(
     val includes: List<String> = emptyList(),

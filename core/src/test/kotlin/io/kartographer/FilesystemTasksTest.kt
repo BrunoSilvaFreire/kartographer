@@ -30,6 +30,13 @@ class FilesystemTasksTest {
     }
 
     @Test
+    fun testFilePathsIteration() {
+        val filePaths = FilePaths(listOf("src/main.kt", "src/utils.kt"))
+        val resolved = filePaths.map { it.toString().replace('\\', '/') }
+        assertEquals(listOf("src/main.kt", "src/utils.kt"), resolved)
+    }
+
+    @Test
     fun testCopyTask(@TempDir tempDir: Path) = runBlocking {
         val srcDir = Files.createDirectory(tempDir.resolve("src"))
         val destDir = tempDir.resolve("dest")

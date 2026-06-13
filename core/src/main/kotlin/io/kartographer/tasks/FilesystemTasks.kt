@@ -5,6 +5,8 @@ import io.kartographer.core.ExecutionContext
 import io.kartographer.core.ExecutionResult
 import io.kartographer.misc.FileFilter
 import io.kartographer.misc.FilePaths
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -20,7 +22,9 @@ open class Copy(name: String) : Task(name) {
             ?: return ExecutionResult.Failure(IllegalArgumentException("Destination directory is not specified."))
 
         try {
-            Files.createDirectories(dest)
+            withContext(Dispatchers.IO) {
+                Files.createDirectories(dest)
+            }
             for (sourceStr in sources.paths) {
                 val sourcePath = context.projectDir.resolve(sourceStr)
                 if (!Files.exists(sourcePath)) {
