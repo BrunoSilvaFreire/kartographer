@@ -121,7 +121,7 @@ class RunCommand : CliktCommand(name = "run", help = "Run a task and all its dep
             checkTopology = { checkTopology(it, worker) },
             onTaskStart = { echo("[INFO] [${it.name}] Started execution...") },
             onTaskSuccess = { echo("[SUCCESS] [${it.name}] Completed successfully.") },
-            onTaskFailure = { task, err, exitCode ->
+            onTaskFailure = { task, err, _ ->
                 echo("[FAILURE] [${task.name}] Failed: ${err.localizedMessage}", err = true)
             }
         )

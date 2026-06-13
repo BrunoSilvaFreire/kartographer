@@ -42,6 +42,10 @@ open class ExecTask(name: String) : Task(name) {
         val resolvedWorkingDir = workingDir ?: context.projectDir.toString()
 
         for (cmd in commands) {
+            if (context.dryRun) {
+                println("[DRY-RUN] Executing: $cmd")
+                continue
+            }
             val exitCode = executor.execute(cmd, resolvedWorkingDir, mergedEnv)
             if (exitCode != 0) {
                 return ExecutionResult.Failure(

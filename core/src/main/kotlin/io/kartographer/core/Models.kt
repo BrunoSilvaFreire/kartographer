@@ -65,7 +65,8 @@ data class ExecutionContext(
     val projectDir: Path,
     val environment: Map<String, String> = System.getenv(),
     val worker: Worker,
-    val variables: java.util.concurrent.ConcurrentHashMap<String, Any> = java.util.concurrent.ConcurrentHashMap()
+    val variables: java.util.concurrent.ConcurrentHashMap<String, Any> = java.util.concurrent.ConcurrentHashMap(),
+    val dryRun: Boolean = false
 )
 
 sealed interface ExecutionResult {
