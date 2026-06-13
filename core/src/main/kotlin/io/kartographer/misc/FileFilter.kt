@@ -57,6 +57,36 @@ class FileFilter(
         val fullyIncluded: Boolean
     )
 
+    private fun hasExclusionOverlapping(rel: Path): Boolean {
+        if (excludes.isEmpty()) return false
+        val relStr = rel.toString().replace('\\', '/')
+        if (relStr.isEmpty()) return true
+
+        return excludes.any { pattern ->
+            val stdPattern = pattern.replace('\\', '/')
+            stdPattern.startsWith("**/") ||
+            stdPattern.startsWith("**") ||
+            stdPattern.startsWith(relStr)
+        }
+    }
+
+    private fun isFullyIncludedByRules(rel: Path): Boolean {
+        if (hasExclusionOverlapping(rel)) return false
+        if (includes.isEmpty()) return true
+
+        val relStr = rel.toString().replace('\\', '/')
+        if (relStr.isEmpty()) {
+            return includes.any { it == "**" }
+        }
+
+        return includes.any { pattern ->
+            val stdPattern = pattern.replace('\\', '/')
+            stdPattern == "**" || 
+            stdPattern == "$relStr/**" || 
+            stdPattern == "$relStr/*"
+        }
+    }
+
     private fun scan(current: Path): ScanResult {
         val baseNorm = baseDir.toAbsolutePath().normalize()
         val rel = if (current == baseNorm) {
@@ -66,9 +96,13 @@ class FileFilter(
         }
 
         if (Files.isDirectory(current)) {
+            // Optimization: check includes/excludes rules directly first
+            if (isFullyIncludedByRules(rel)) {
+                return ScanResult(listOf(current), true)
+            }
+
             val children = try {
                 Files.list(current).use { stream ->
-                    // Convert java.util.stream.Stream to List using collect
                     stream.toList()
                 }
             } catch (e: Exception) {
