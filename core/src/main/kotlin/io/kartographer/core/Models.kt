@@ -12,34 +12,54 @@ value class WorkerId(val value: String) {
     override fun toString() = value
 }
 
-abstract class TaskInputs {
-    val files = mutableSetOf<String>()
-    val dirs = mutableSetOf<String>()
+abstract class TaskInput {
+    abstract val path: String
 }
 
-class DefaultTaskInputs : TaskInputs()
+class FileInput(override val path: String) : TaskInput()
+class DirInput(override val path: String) : TaskInput()
 
-abstract class TaskOutputs {
-    val files = mutableSetOf<String>()
-    val dirs = mutableSetOf<String>()
+abstract class TaskOutput {
+    abstract val path: String
 }
 
-class DefaultTaskOutputs : TaskOutputs()
+class FileOutput(override val path: String) : TaskOutput()
+class DirOutput(override val path: String) : TaskOutput()
+
+class TaskInputs {
+    val all = mutableSetOf<TaskInput>()
+
+    val files: Set<String>
+        get() = all.filterIsInstance<FileInput>().map { it.path }.toSet()
+
+    val dirs: Set<String>
+        get() = all.filterIsInstance<DirInput>().map { it.path }.toSet()
+}
+
+class TaskOutputs {
+    val all = mutableSetOf<TaskOutput>()
+
+    val files: Set<String>
+        get() = all.filterIsInstance<FileOutput>().map { it.path }.toSet()
+
+    val dirs: Set<String>
+        get() = all.filterIsInstance<DirOutput>().map { it.path }.toSet()
+}
 
 fun TaskInputs.file(path: String) {
-    files.add(path)
+    all.add(FileInput(path))
 }
 
 fun TaskInputs.dir(path: String) {
-    dirs.add(path)
+    all.add(DirInput(path))
 }
 
 fun TaskOutputs.file(path: String) {
-    files.add(path)
+    all.add(FileOutput(path))
 }
 
 fun TaskOutputs.dir(path: String) {
-    dirs.add(path)
+    all.add(DirOutput(path))
 }
 
 sealed interface TopologyRequirement {
@@ -84,8 +104,8 @@ abstract class Task(val name: String) {
     val id: TaskId = TaskId(name)
     val dependencyObjects = mutableSetOf<Task>()
     val dependencyNames = mutableSetOf<String>()
-    val inputs: TaskInputs = DefaultTaskInputs()
-    val outputs: TaskOutputs = DefaultTaskOutputs()
+    val inputs = TaskInputs()
+    val outputs = TaskOutputs()
     val topologyRequirements = mutableListOf<TopologyRequirement>()
 
     val registeredProperties = mutableListOf<Property<*>>()
