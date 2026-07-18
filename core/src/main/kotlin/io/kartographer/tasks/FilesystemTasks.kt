@@ -1,8 +1,8 @@
 package io.kartographer.tasks
 
-import io.kartographer.core.Task
-import io.kartographer.core.ExecutionContext
-import io.kartographer.core.ExecutionResult
+import io.kartographer.core.model.Task
+import io.kartographer.core.model.ExecutionContext
+import io.kartographer.core.model.ExecutionResult
 import io.kartographer.misc.FileFilter
 import io.kartographer.misc.FilePaths
 import kotlinx.coroutines.Dispatchers

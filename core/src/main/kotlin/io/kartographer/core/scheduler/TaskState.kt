@@ -1,7 +1,7 @@
 package io.kartographer.core.scheduler
 
-import io.kartographer.core.Task
-import io.kartographer.core.ExecutionContext
+import io.kartographer.core.model.Task
+import io.kartographer.core.model.ExecutionContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.nio.file.Files

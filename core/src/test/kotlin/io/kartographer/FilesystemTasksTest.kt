@@ -1,9 +1,9 @@
 package io.kartographer
 
-import io.kartographer.core.ExecutionContext
-import io.kartographer.core.ExecutionResult
-import io.kartographer.core.Worker
-import io.kartographer.core.WorkerId
+import io.kartographer.core.model.ExecutionContext
+import io.kartographer.core.model.ExecutionResult
+import io.kartographer.core.model.Worker
+import io.kartographer.core.model.WorkerId
 import io.kartographer.misc.FileFilter
 import io.kartographer.misc.FilePaths
 import io.kartographer.tasks.Copy

@@ -1,6 +1,7 @@
 package io.kartographer
 
 import io.kartographer.core.*
+import io.kartographer.core.model.*
 import io.kartographer.core.scheduler.DagScheduler
 import io.kartographer.dsl.task
 import io.kartographer.dsl.TaskRegistry
@@ -42,10 +43,10 @@ class PropertiesTest {
     fun testPropertyBindingAndImplicitDependency() {
         val producer = task<ProducerTask>("producer") { }
         val consumer = task<ConsumerTask>("consumer") {
-            messageInput.set(producer.messageOutput)
+            messageInput.setProvider(producer.messageOutput)
         }
 
-        val scheduler = DagScheduler(TaskRegistry.tasks)
+        val scheduler = DagScheduler(TaskRegistry.nodes)
         val order = scheduler.getExecutionOrder()
 
         // Verify implicit dependency: producer must run before consumer
@@ -58,7 +59,7 @@ class PropertiesTest {
     fun testPropertyResolutionAndVariableSharing() = runBlocking {
         val producer = task<ProducerTask>("producer") { }
         val consumer = task<ConsumerTask>("consumer") {
-            messageInput.set(producer.messageOutput)
+            messageInput.setProvider(producer.messageOutput)
         }
 
         val worker = Worker(WorkerId("test-worker"))
@@ -78,5 +79,18 @@ class PropertiesTest {
         // Assert shared context state and property values
         assertEquals(true, context.variables["producer_ran"])
         assertEquals("Hello from producer", context.variables["received_message"])
+    }
+
+    @Test
+    fun testWithCliDsl() = runBlocking {
+        val prop = Property<String>().withCLI("version", "Override version") {
+            completeWith("1.0", "2.0")
+        }
+
+        assertEquals("version", prop.cliName)
+        assertEquals("Override version", prop.cliDescription)
+        
+        val completions = prop.completionProvider?.invoke()
+        assertEquals(listOf("1.0", "2.0"), completions)
     }
 }

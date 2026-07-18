@@ -1,0 +1,62 @@
+package io.kartographer.local
+
+import io.kartographer.core.model.ExecutionContext
+import io.kartographer.core.model.ExecutionEnvironment
+import io.kartographer.core.model.ExecutionObserver
+import io.kartographer.core.model.Task
+import io.kartographer.core.model.UserPrompter
+import java.util.Scanner
+
+class ConsoleUserPrompter(val task: Task? = null, val observer: ExecutionObserver? = null) : UserPrompter {
+    override fun prompt(message: String, secret: Boolean): String {
+        observer?.onEvent(io.kartographer.core.model.ExecutionEvent.PromptRequested(task, message))
+        val console = System.console()
+        val result = if (console != null) {
+            if (secret) {
+                String(console.readPassword("") ?: CharArray(0))
+            } else {
+                console.readLine("") ?: ""
+            }
+        } else {
+            val scanner = Scanner(System.`in`)
+            if (scanner.hasNextLine()) scanner.nextLine() else ""
+        }
+        observer?.onEvent(io.kartographer.core.model.ExecutionEvent.PromptCompleted)
+        return result
+    }
+}
+
+class HostExecutionEnvironment(val context: ExecutionContext) : ExecutionEnvironment {
+    override suspend fun execute(
+        command: String,
+        workingDir: String,
+        environment: Map<String, String>,
+        requiresElevation: Boolean
+    ): Int {
+        val executor = LocalProcessExecutor()
+
+        context.redirectOutput?.let {
+            executor.redirectOutput = it
+            executor.stdoutConsumer = {}
+        }
+        context.redirectError?.let {
+            executor.redirectError = it
+            executor.stderrConsumer = {}
+            executor.redirectErrorStream = false
+        }
+        
+        var finalCommand = command
+        if (requiresElevation && !System.getProperty("os.name").lowercase().contains("win")) {
+            val password = (context.variables["SUDO_PASSWORD"] as? String) 
+                ?: context.prompter.prompt("Password for sudo: ", secret = true).also {
+                    context.variables["SUDO_PASSWORD"] = it
+                }
+            executor.inputString = "$password\n"
+            // Escape quotes inside command if necessary, though simpler to pass command
+            val escapedCommand = command.replace("\"", "\\\"")
+            finalCommand = "sudo -S -p \"\" sh -c \"$escapedCommand\""
+        }
+        
+        return executor.execute(finalCommand, workingDir, environment)
+    }
+}

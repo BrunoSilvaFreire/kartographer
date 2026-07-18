@@ -1,10 +1,11 @@
 package io.kartographer.tasks.proto
 
-import io.kartographer.tasks.ExecTask
-import io.kartographer.core.ExecutionContext
-import io.kartographer.core.ExecutionResult
+import io.kartographer.tasks.DefaultTask
+import io.kartographer.core.model.ExecutionContext
+import io.kartographer.core.model.ExecutionResult
+import io.kartographer.core.model.executeBash
 
-open class ProtoTask(name: String) : ExecTask(name) {
+open class ProtoTask(name: String) : DefaultTask(name) {
     init {
         topology {
             requiresCapability("protoc")
@@ -37,8 +38,9 @@ open class ProtoCompile(name: String) : ProtoTask(name) {
         args.addAll(extraArgs)
         args.addAll(protoFiles)
 
-        commands.clear()
-        exec("protoc ${args.joinToString(" ")}")
-        return super.execute(context)
+        return context.executeBash {
+            command("protoc")
+            args(args)
+        }
     }
 }

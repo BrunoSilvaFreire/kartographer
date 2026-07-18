@@ -1,118 +1,39 @@
-package io.kartographer.core
+package io.kartographer.core.model
 
-import java.nio.file.Path
+import io.kartographer.core.Property
+import io.kartographer.core.Provider
+import io.kartographer.core.TaskOutputProvider
 
-@JvmInline
-value class TaskId(val value: String) {
-    override fun toString() = value
-}
-
-@JvmInline
-value class WorkerId(val value: String) {
-    override fun toString() = value
-}
-
-abstract class TaskInput {
-    abstract val path: String
-}
-
-class FileInput(override val path: String) : TaskInput()
-class DirInput(override val path: String) : TaskInput()
-
-abstract class TaskOutput {
-    abstract val path: String
-}
-
-class FileOutput(override val path: String) : TaskOutput()
-class DirOutput(override val path: String) : TaskOutput()
-
-class TaskInputs {
-    val all = mutableSetOf<TaskInput>()
-
-    val files: Set<String>
-        get() = all.filterIsInstance<FileInput>().map { it.path }.toSet()
-
-    val dirs: Set<String>
-        get() = all.filterIsInstance<DirInput>().map { it.path }.toSet()
-}
-
-class TaskOutputs {
-    val all = mutableSetOf<TaskOutput>()
-
-    val files: Set<String>
-        get() = all.filterIsInstance<FileOutput>().map { it.path }.toSet()
-
-    val dirs: Set<String>
-        get() = all.filterIsInstance<DirOutput>().map { it.path }.toSet()
-}
-
-fun TaskInputs.file(path: String) {
-    all.add(FileInput(path))
-}
-
-fun TaskInputs.dir(path: String) {
-    all.add(DirInput(path))
-}
-
-fun TaskOutputs.file(path: String) {
-    all.add(FileOutput(path))
-}
-
-fun TaskOutputs.dir(path: String) {
-    all.add(DirOutput(path))
-}
-
-sealed interface TopologyRequirement {
-    data object LocalOnly : TopologyRequirement
-    
-    data class RequiresLabel(val key: String, val value: String) : TopologyRequirement
-    
-    data class PrefersLabel(val key: String, val value: String) : TopologyRequirement
-    
-    data class RequiresCapability(val capability: String) : TopologyRequirement
-}
-
-data class Worker(
-    val id: WorkerId,
-    val labels: Map<String, String> = emptyMap(),
-    val capabilities: Set<String> = emptySet()
-)
-
-data class PlacementDecision(
-    val taskId: TaskId,
-    val workerId: WorkerId,
-    val isSatisfied: Boolean,
-    val reason: String? = null
-)
-
-data class ExecutionContext(
-    val projectDir: Path,
-    val environment: Map<String, String> = System.getenv(),
-    val worker: Worker,
-    val variables: java.util.concurrent.ConcurrentHashMap<String, Any> = java.util.concurrent.ConcurrentHashMap(),
-    val dryRun: Boolean = false
-)
-
-sealed interface ExecutionResult {
-    data object Success : ExecutionResult
-    data object UpToDate : ExecutionResult
-    
-    data class Failure(val error: Throwable, val exitCode: Int? = null) : ExecutionResult
-}
-
-abstract class Task(val name: String) {
+abstract class Node(val name: String) {
     val id: TaskId = TaskId(name)
-    val dependencyObjects = mutableSetOf<Task>()
+    val dependencyObjects = mutableSetOf<Node>()
     val dependencyNames = mutableSetOf<String>()
+
+    fun dependsOn(vararg nodes: Node) {
+        dependencyObjects.addAll(nodes)
+    }
+
+    fun dependsOn(vararg nodeNames: String) {
+        dependencyNames.addAll(nodeNames)
+    }
+}
+
+// A Step in the DAG that doesn't change state.
+abstract class Validation(name: String) : Node(name)
+
+// Infers an action that is executed
+abstract class Task(name: String) : Node(name) {
     val inputs = TaskInputs()
     val outputs = TaskOutputs()
     val topologyRequirements = mutableListOf<TopologyRequirement>()
 
     val registeredProperties = mutableListOf<Property<*>>()
+    open val requiresElevation: Boolean get() = false
 
-    protected fun <T> property(): Property<T> {
+    protected fun <T> property(initBlock: (Property<T>.() -> Unit)? = null): Property<T> {
         val prop = Property<T>()
         registeredProperties.add(prop)
+        initBlock?.invoke(prop)
         return prop
     }
 
@@ -202,14 +123,6 @@ abstract class Task(val name: String) {
         return false
     }
 
-    fun dependsOn(vararg tasks: Task) {
-        dependencyObjects.addAll(tasks)
-    }
-
-    fun dependsOn(vararg taskNames: String) {
-        dependencyNames.addAll(taskNames)
-    }
-
     fun topology(block: TopologyBuilder.() -> Unit) {
         val builder = TopologyBuilder()
         builder.block()
@@ -217,24 +130,4 @@ abstract class Task(val name: String) {
     }
 
     abstract suspend fun execute(context: ExecutionContext): ExecutionResult
-}
-
-class TopologyBuilder {
-    val requirements = mutableListOf<TopologyRequirement>()
-
-    fun localOnly() {
-        requirements.add(TopologyRequirement.LocalOnly)
-    }
-
-    fun requires(key: String, value: String) {
-        requirements.add(TopologyRequirement.RequiresLabel(key, value))
-    }
-
-    fun prefers(key: String, value: String) {
-        requirements.add(TopologyRequirement.PrefersLabel(key, value))
-    }
-
-    fun requiresCapability(capability: String) {
-        requirements.add(TopologyRequirement.RequiresCapability(capability))
-    }
 }

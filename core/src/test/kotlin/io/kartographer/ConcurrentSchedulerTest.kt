@@ -1,6 +1,7 @@
 package io.kartographer
 
 import io.kartographer.core.*
+import io.kartographer.core.model.*
 import io.kartographer.core.scheduler.ConcurrentScheduler
 import io.kartographer.dsl.task
 import io.kartographer.dsl.TaskRegistry
@@ -33,6 +34,7 @@ class ConcurrentSchedulerTest {
                 aStartedAt = System.currentTimeMillis()
                 delay(150)
                 aFinishedAt = System.currentTimeMillis()
+                Unit
             }
         }
 
@@ -41,6 +43,7 @@ class ConcurrentSchedulerTest {
                 bStartedAt = System.currentTimeMillis()
                 delay(150)
                 bFinishedAt = System.currentTimeMillis()
+                Unit
             }
         }
 
@@ -48,10 +51,11 @@ class ConcurrentSchedulerTest {
             dependsOn(a, b)
             action {
                 cStartedAt = System.currentTimeMillis()
+                Unit
             }
         }
 
-        val scheduler = ConcurrentScheduler(TaskRegistry.tasks)
+        val scheduler = ConcurrentScheduler(TaskRegistry.nodes)
         val worker = Worker(WorkerId("test-worker"))
         val context = ExecutionContext(
             projectDir = Paths.get("").toAbsolutePath(),
@@ -59,12 +63,9 @@ class ConcurrentSchedulerTest {
         )
 
         val result = scheduler.execute(
-            targetTask = c,
+            targetNode = c,
             context = context,
-            checkTopology = { true },
-            onTaskStart = {},
-            onTaskSuccess = {},
-            onTaskFailure = { _, _, _ -> }
+            checkTopology = { true }
         )
 
         assertTrue(result is ExecutionResult.Success)
@@ -94,6 +95,7 @@ class ConcurrentSchedulerTest {
             action {
                 delay(200)
                 bRan = true
+                Unit
             }
         }
 
@@ -102,7 +104,7 @@ class ConcurrentSchedulerTest {
             action {}
         }
 
-        val scheduler = ConcurrentScheduler(TaskRegistry.tasks)
+        val scheduler = ConcurrentScheduler(TaskRegistry.nodes)
         val worker = Worker(WorkerId("test-worker"))
         val context = ExecutionContext(
             projectDir = Paths.get("").toAbsolutePath(),
@@ -110,12 +112,9 @@ class ConcurrentSchedulerTest {
         )
 
         val result = scheduler.execute(
-            targetTask = c,
+            targetNode = c,
             context = context,
-            checkTopology = { true },
-            onTaskStart = {},
-            onTaskSuccess = {},
-            onTaskFailure = { _, _, _ -> }
+            checkTopology = { true }
         )
 
         assertTrue(result is ExecutionResult.Failure)

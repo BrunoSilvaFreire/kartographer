@@ -1,10 +1,11 @@
 package io.kartographer.tasks.gradle
 
-import io.kartographer.tasks.ExecTask
-import io.kartographer.core.ExecutionContext
-import io.kartographer.core.ExecutionResult
+import io.kartographer.tasks.DefaultTask
+import io.kartographer.core.model.ExecutionContext
+import io.kartographer.core.model.ExecutionResult
+import io.kartographer.core.model.executeBash
 
-open class GradleTask(name: String) : ExecTask(name) {
+open class GradleTask(name: String) : DefaultTask(name) {
     val tasks = mutableListOf<String>()
     var buildFile: String? = null
     var projectDir: String? = null
@@ -20,13 +21,14 @@ open class GradleTask(name: String) : ExecTask(name) {
 
         val gradleBin = if (useWrapper) "./gradlew" else "gradle"
         val args = mutableListOf<String>()
-        buildFile?.let { args.add("-b $it") }
-        projectDir?.let { args.add("-p $it") }
+        buildFile?.let { args.add("-b"); args.add(it) }
+        projectDir?.let { args.add("-p"); args.add(it) }
         args.addAll(extraArgs)
         args.addAll(tasks)
 
-        commands.clear()
-        exec("$gradleBin ${args.joinToString(" ")}")
-        return super.execute(context)
+        return context.executeBash {
+            command(gradleBin)
+            args(args)
+        }
     }
 }

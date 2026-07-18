@@ -1,9 +1,10 @@
 package io.kartographer.tasks.go
 
-import io.kartographer.core.ExecutionContext
-import io.kartographer.core.ExecutionResult
-import io.kartographer.core.Worker
-import io.kartographer.core.WorkerId
+import io.kartographer.core.model.ExecutionEnvironment
+import io.kartographer.core.model.ExecutionContext
+import io.kartographer.core.model.ExecutionResult
+import io.kartographer.core.model.Worker
+import io.kartographer.core.model.WorkerId
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
@@ -13,15 +14,15 @@ class GoTasksTest {
 
     @Test
     fun testGoBuildConfiguration() = runBlocking {
-        val customBuildTask = object : GoBuild("mock-go-build") {
-            override suspend fun execute(context: ExecutionContext): ExecutionResult {
-                val outCmd = output?.let { "-o $it" } ?: ""
-                val mainCmd = mainFile ?: "."
-                commands.clear()
-                exec("go build $outCmd $mainCmd")
-                return ExecutionResult.Success
+        val capturedCommands = mutableListOf<String>()
+        val mockEnv = object : ExecutionEnvironment {
+            override suspend fun execute(command: String, workingDir: String, environment: Map<String, String>, requiresElevation: Boolean): Int {
+                capturedCommands.add(command)
+                return 0
             }
-        }.apply {
+        }
+        
+        val customBuildTask = GoBuild("mock-go-build").apply {
             output = "bin/myapp"
             mainFile = "main.go"
         }
@@ -29,34 +30,38 @@ class GoTasksTest {
         val worker = Worker(WorkerId("test-worker"))
         val context = ExecutionContext(
             projectDir = Paths.get("").toAbsolutePath(),
-            worker = worker
+            worker = worker,
+            executionEnvironment = mockEnv
         )
 
         customBuildTask.execute(context)
-        assertEquals(1, customBuildTask.commands.size)
-        assertEquals("go build -o bin/myapp main.go", customBuildTask.commands[0])
+        assertEquals(1, capturedCommands.size)
+        assertEquals("go build -o bin/myapp main.go", capturedCommands[0])
     }
 
     @Test
     fun testGoTestConfiguration() = runBlocking {
-        val customTestTask = object : GoTest("mock-go-test") {
-            override suspend fun execute(context: ExecutionContext): ExecutionResult {
-                commands.clear()
-                exec("go test ${packages.joinToString(" ")}")
-                return ExecutionResult.Success
+        val capturedCommands = mutableListOf<String>()
+        val mockEnv = object : ExecutionEnvironment {
+            override suspend fun execute(command: String, workingDir: String, environment: Map<String, String>, requiresElevation: Boolean): Int {
+                capturedCommands.add(command)
+                return 0
             }
-        }.apply {
+        }
+
+        val customTestTask = GoTest("mock-go-test").apply {
             packages = mutableListOf("./cmd/...", "./pkg/...")
         }
 
         val worker = Worker(WorkerId("test-worker"))
         val context = ExecutionContext(
             projectDir = Paths.get("").toAbsolutePath(),
-            worker = worker
+            worker = worker,
+            executionEnvironment = mockEnv
         )
 
         customTestTask.execute(context)
-        assertEquals(1, customTestTask.commands.size)
-        assertEquals("go test ./cmd/... ./pkg/...", customTestTask.commands[0])
+        assertEquals(1, capturedCommands.size)
+        assertEquals("go test ./cmd/... ./pkg/...", capturedCommands[0])
     }
 }

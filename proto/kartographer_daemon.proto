@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package io.kartographer.daemon;
+
+option java_multiple_files = true;
+option java_package = "io.kartographer.daemon.proto";
+
+service KartographerDaemon {
+  // Query daemon info and capabilities
+  rpc GetWorkerInfo (WorkerInfoRequest) returns (WorkerInfoResponse);
+
+  // Execute a task and return the final execution result and log location
+  rpc ExecuteTask (ExecuteTaskRequest) returns (ExecuteTaskResponse);
+}
+
+message WorkerInfoRequest {}
+
+message WorkerInfoResponse {
+  string worker_id = 1;
+  map<string, string> labels = 2;
+  repeated string capabilities = 3;
+}
+
+message ExecuteTaskRequest {
+  string task_type = 1;       // e.g. "io.kartographer.tasks.go.GoBuild"
+  string task_name = 2;       // e.g. "build tileserver"
+  string run_id = 3;          // Unique identifier for the pipeline run (used to group logs)
+  
+  // Serialized task properties
+  map<string, string> properties = 4;
+  
+  // Inputs & Outputs
+  repeated string input_files = 5;
+  repeated string input_dirs = 6;
+  repeated string output_files = 7;
+  repeated string output_dirs = 8;
+  
+  string project_dir = 9;
+  map<string, string> environment = 10;
+  bool dry_run = 11;
+}
+
+message ExecuteTaskResponse {
+  enum Status {
+    SUCCESS = 0;
+    FAILURE = 1;
+    UP_TO_DATE = 2;
+  }
+  Status status = 1;
+  string error_message = 2;
+  int32 exit_code = 3;
+  string log_path = 4;        // Path to the log file on the daemon host
+}

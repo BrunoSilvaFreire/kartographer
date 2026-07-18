@@ -1,76 +1,79 @@
 package io.kartographer.core.scheduler
 
-import io.kartographer.core.Task
-import io.kartographer.core.TaskId
+import io.kartographer.core.model.Node
+import io.kartographer.core.model.Task
+import io.kartographer.core.model.TaskId
 
-class MissingDependencyException(val taskName: String, val dependencyName: String) :
-    RuntimeException("Task '$taskName' depends on '$dependencyName', which does not exist.")
+class MissingDependencyException(val nodeName: String, val dependencyName: String) :
+    RuntimeException("Node '$nodeName' depends on '$dependencyName', which does not exist.")
 
 class CycleDetectedException(val cycle: List<String>) :
-    RuntimeException("Cycle detected in task dependencies: ${cycle.joinToString(" -> ")}")
+    RuntimeException("Cycle detected in dependencies: ${cycle.joinToString(" -> ")}")
 
-class DagScheduler(private val tasks: Map<TaskId, Task>) {
+class DagScheduler(private val nodes: Map<TaskId, Node>) {
 
-    // Resolve dependencies for all tasks and detect missing dependencies
-    fun resolveDependencies(): Map<Task, Set<Task>> {
-        val resolved = mutableMapOf<Task, Set<Task>>()
-        for (task in tasks.values) {
-            val deps = mutableSetOf<Task>()
+    // Resolve dependencies for all nodes and detect missing dependencies
+    fun resolveDependencies(): Map<Node, Set<Node>> {
+        val resolved = mutableMapOf<Node, Set<Node>>()
+        for (node in nodes.values) {
+            val deps = mutableSetOf<Node>()
             // Add direct object dependencies
-            deps.addAll(task.dependencyObjects)
+            deps.addAll(node.dependencyObjects)
 
             // Resolve name-based dependencies
-            for (depName in task.dependencyNames) {
+            for (depName in node.dependencyNames) {
                 val depId = TaskId(depName)
-                val depTask = tasks[depId] ?: throw MissingDependencyException(task.name, depName)
-                deps.add(depTask)
+                val depNode = nodes[depId] ?: throw MissingDependencyException(node.name, depName)
+                deps.add(depNode)
             }
 
             // Resolve property-based implicit dependencies
-            for (prop in task.registeredProperties) {
-                prop.producingTask?.let { producer ->
-                    deps.add(producer)
+            if (node is Task) {
+                for (prop in node.registeredProperties) {
+                    prop.producingTask?.let { producer ->
+                        deps.add(producer)
+                    }
                 }
             }
-            resolved[task] = deps
+            resolved[node] = deps
         }
         return resolved
     }
 
-    // Returns a list of tasks in topological order (execution order)
-    fun getExecutionOrder(): List<Task> {
+    // Returns a list of nodes in topological order (execution order)
+    fun getExecutionOrder(): List<Node> {
         val adjacencyMap = resolveDependencies()
-        val visited = mutableMapOf<Task, VisitState>()
-        val result = mutableListOf<Task>()
+        val visited = mutableMapOf<Node, VisitState>()
+        val result = mutableListOf<Node>()
 
         // Helper function for DFS
-        fun dfs(task: Task, path: MutableList<Task>) {
-            val state = visited[task]
+        fun dfs(node: Node, path: MutableList<Node>) {
+            val state = visited[node]
             if (state == VisitState.VISITING) {
-                val cycleStartIndex = path.indexOf(task)
-                val cyclePath = (path.subList(cycleStartIndex, path.size) + task).map { it.name }
+                val cycleStartIndex = path.indexOf(node)
+                val cyclePath = (path.subList(cycleStartIndex, path.size) + node).map { it.name }
                 throw CycleDetectedException(cyclePath)
             }
             if (state == VisitState.VISITED) {
                 return
             }
 
-            visited[task] = VisitState.VISITING
-            path.add(task)
+            visited[node] = VisitState.VISITING
+            path.add(node)
 
-            val deps = adjacencyMap[task] ?: emptySet()
+            val deps = adjacencyMap[node] ?: emptySet()
             for (dep in deps) {
                 dfs(dep, path)
             }
 
             path.removeAt(path.size - 1)
-            visited[task] = VisitState.VISITED
-            result.add(task)
+            visited[node] = VisitState.VISITED
+            result.add(node)
         }
 
-        for (task in tasks.values) {
-            if (visited[task] == null) {
-                dfs(task, mutableListOf())
+        for (node in nodes.values) {
+            if (visited[node] == null) {
+                dfs(node, mutableListOf())
             }
         }
 

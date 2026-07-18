@@ -1,50 +1,71 @@
 package io.kartographer.core.scheduler
 
-import io.kartographer.core.ExecutionContext
-import io.kartographer.core.ExecutionResult
-import io.kartographer.core.Task
-import io.kartographer.core.TaskId
+import io.kartographer.core.model.ExecutionEvent
+import io.kartographer.core.model.ExecutionContext
+import io.kartographer.core.model.ExecutionObserver
+import io.kartographer.core.model.ExecutionResult
+import io.kartographer.core.model.Node
+import io.kartographer.core.model.Task
+import io.kartographer.core.model.TaskId
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import io.kartographer.core.model.graph.AdjacencyList
 import java.util.concurrent.ConcurrentHashMap
 
-class ConcurrentScheduler(private val allTasks: Map<TaskId, Task>) {
+class ConcurrentScheduler(private val allNodes: Map<TaskId, Node>) {
 
     suspend fun execute(
-        targetTask: Task,
+        targetNode: Node,
         context: ExecutionContext,
-        checkTopology: (Task) -> Boolean,
-        onTaskStart: (Task) -> Unit,
-        onTaskSuccess: (Task) -> Unit,
-        onTaskFailure: (Task, Throwable, Int?) -> Unit
+        checkTopology: (Node) -> Boolean
     ): ExecutionResult = supervisorScope {
-        val dagScheduler = DagScheduler(allTasks)
+        val dagScheduler = DagScheduler(allNodes)
         val resolvedDeps = dagScheduler.resolveDependencies()
 
-        // 1. Collect target task and its transitive dependencies
-        val executionSet = mutableSetOf<Task>()
-        fun collect(t: Task) {
-            if (executionSet.add(t)) {
-                val deps = resolvedDeps[t] ?: emptySet()
+        // 1. Collect target node and its transitive dependencies
+        val executionSet = mutableSetOf<Node>()
+        fun collect(n: Node) {
+            if (executionSet.add(n)) {
+                val deps = resolvedDeps[n] ?: emptySet()
                 for (d in deps) {
                     collect(d)
                 }
             }
         }
-        collect(targetTask)
+        collect(targetNode)
 
-        // 2. Map tasks to their remaining dependencies within this execution set
-        val remainingDeps = ConcurrentHashMap<Task, MutableSet<Task>>()
-        for (task in executionSet) {
-            val deps = (resolvedDeps[task] ?: emptySet()).filter { it in executionSet }
-            remainingDeps[task] = deps.toMutableSet()
+        // Build AdjacencyList graph
+        val graph = AdjacencyList<Node, Unit>()
+        val nodeIndices = mutableMapOf<Node, Int>()
+        for (node in executionSet) {
+            nodeIndices[node] = graph.push(node)
+        }
+        for (node in executionSet) {
+            val fromIndex = nodeIndices[node]!!
+            val deps = resolvedDeps[node] ?: emptySet()
+            for (dep in deps) {
+                if (dep in executionSet) {
+                    val toIndex = nodeIndices[dep]!!
+                    graph.connect(fromIndex, toIndex, Unit)
+                }
+            }
+        }
+
+        context.observer?.onEvent(ExecutionEvent.PipelineStarted(executionSet.size, graph))
+
+        // 2. Map nodes to their remaining dependencies within this execution set
+        val remainingDeps = ConcurrentHashMap<Node, MutableSet<Node>>()
+        for (node in executionSet) {
+            val deps = (resolvedDeps[node] ?: emptySet()).filter { it in executionSet }
+            remainingDeps[node] = deps.toMutableSet()
+            context.observer?.onEvent(ExecutionEvent.TaskQueued(node))
         }
 
         val mutex = Mutex()
-        val runningJobs = ConcurrentHashMap<Task, Job>()
-        val completedTasks = ConcurrentHashMap.newKeySet<Task>()
-        var failedTask: Task? = null
+        val runningJobs = ConcurrentHashMap<Node, Job>()
+        val completedNodes = ConcurrentHashMap.newKeySet<Node>()
+        var failedNode: Node? = null
         var failureResult: ExecutionResult.Failure? = null
 
         val scope = this
@@ -52,72 +73,94 @@ class ConcurrentScheduler(private val allTasks: Map<TaskId, Task>) {
         fun checkAndSpawnReady() {
             scope.launch {
                 mutex.withLock {
-                    if (failedTask != null) return@withLock
+                    if (failedNode != null) return@withLock
 
-                    for (task in executionSet) {
-                        if (task !in completedTasks && task !in runningJobs.keys) {
-                            val deps = remainingDeps[task] ?: emptySet()
+                    for (node in executionSet) {
+                        if (node !in completedNodes && node !in runningJobs.keys) {
+                            val deps = remainingDeps[node] ?: emptySet()
                             if (deps.isEmpty()) {
-                                onTaskStart(task)
+                                context.observer?.onEvent(ExecutionEvent.TaskStarted(node))
 
-                                val job = scope.launch taskJob@{
+                                val job = scope.launch nodeJob@{
                                     // Check topology placement requirements
-                                    if (!checkTopology(task)) {
-                                        val err = RuntimeException("Task '${task.name}' topology requirements not satisfied.")
-                                        onTaskFailure(task, err, 1)
+                                    if (!checkTopology(node)) {
+                                        val err = RuntimeException("Node '${node.name}' topology requirements not satisfied.")
+                                        val result = ExecutionResult.Failure(err, 1)
+                                        context.observer?.onEvent(ExecutionEvent.TaskCompleted(node, result))
                                         mutex.withLock {
-                                            if (failedTask == null) {
-                                                failedTask = task
-                                                failureResult = ExecutionResult.Failure(err, 1)
+                                            if (failedNode == null) {
+                                                failedNode = node
+                                                failureResult = result
                                             }
                                         }
                                         cancelAllJobs(runningJobs.values)
-                                        return@taskJob
+                                        return@nodeJob
                                     }
 
-                                    // Check if up-to-date
-                                    if (task.isUpToDate(context)) {
-                                        // Trigger callback to inform runner it is up-to-date
-                                        // We will pass an UpToDate flag or trigger onTaskSuccess
-                                        onTaskSuccess(task)
+                                    if (node !is Task) {
+                                        val result = ExecutionResult.Success
+                                        context.observer?.onEvent(ExecutionEvent.TaskCompleted(node, result))
                                         mutex.withLock {
-                                            completedTasks.add(task)
-                                            for (otherTask in executionSet) {
-                                                remainingDeps[otherTask]?.remove(task)
+                                            completedNodes.add(node)
+                                            for (otherNode in executionSet) {
+                                                remainingDeps[otherNode]?.remove(node)
                                             }
                                         }
                                         checkAndSpawnReady()
-                                        return@taskJob
+                                        return@nodeJob
+                                    }
+
+                                    val taskContext = context.copy(
+                                        task = node,
+                                        prompter = io.kartographer.local.ConsoleUserPrompter(task = node, observer = context.observer)
+                                    )
+                                    val finalContext = taskContext.copy(
+                                        executionEnvironment = context.executionEnvironment ?: io.kartographer.local.HostExecutionEnvironment(taskContext)
+                                    )
+
+                                    // Check if up-to-date
+                                    if (node.isUpToDate(finalContext)) {
+                                        // Trigger callback to inform runner it is up-to-date
+                                        val result = ExecutionResult.UpToDate
+                                        context.observer?.onEvent(ExecutionEvent.TaskCompleted(node, result))
+                                        mutex.withLock {
+                                            completedNodes.add(node)
+                                            for (otherNode in executionSet) {
+                                                remainingDeps[otherNode]?.remove(node)
+                                            }
+                                        }
+                                        checkAndSpawnReady()
+                                        return@nodeJob
                                     }
 
                                     // Execute task
-                                    when (val result = task.execute(context)) {
+                                    when (val result = node.execute(finalContext)) {
                                         is ExecutionResult.Success -> {
-                                            TaskStateStore.saveState(context, task)
-                                            onTaskSuccess(task)
+                                            TaskStateStore.saveState(finalContext, node)
+                                            context.observer?.onEvent(ExecutionEvent.TaskCompleted(node, result))
                                             mutex.withLock {
-                                                completedTasks.add(task)
-                                                for (otherTask in executionSet) {
-                                                    remainingDeps[otherTask]?.remove(task)
+                                                completedNodes.add(node)
+                                                for (otherNode in executionSet) {
+                                                    remainingDeps[otherNode]?.remove(node)
                                                 }
                                             }
                                             checkAndSpawnReady()
                                         }
                                         is ExecutionResult.UpToDate -> {
-                                            onTaskSuccess(task)
+                                            context.observer?.onEvent(ExecutionEvent.TaskCompleted(node, result))
                                             mutex.withLock {
-                                                completedTasks.add(task)
-                                                for (otherTask in executionSet) {
-                                                    remainingDeps[otherTask]?.remove(task)
+                                                completedNodes.add(node)
+                                                for (otherNode in executionSet) {
+                                                    remainingDeps[otherNode]?.remove(node)
                                                 }
                                             }
                                             checkAndSpawnReady()
                                         }
                                         is ExecutionResult.Failure -> {
-                                            onTaskFailure(task, result.error, result.exitCode)
+                                            context.observer?.onEvent(ExecutionEvent.TaskCompleted(node, result))
                                             mutex.withLock {
-                                                if (failedTask == null) {
-                                                    failedTask = task
+                                                if (failedNode == null) {
+                                                    failedNode = node
                                                     failureResult = result
                                                 }
                                             }
@@ -125,7 +168,7 @@ class ConcurrentScheduler(private val allTasks: Map<TaskId, Task>) {
                                         }
                                     }
                                 }
-                                runningJobs[task] = job
+                                runningJobs[node] = job
                             }
                         }
                     }
@@ -144,7 +187,9 @@ class ConcurrentScheduler(private val allTasks: Map<TaskId, Task>) {
             delay(10)
         }
 
-        failureResult ?: ExecutionResult.Success
+        val finalResult = failureResult ?: ExecutionResult.Success
+        context.observer?.onEvent(ExecutionEvent.PipelineCompleted(finalResult))
+        finalResult
     }
 
     private fun cancelAllJobs(jobs: Collection<Job>) {

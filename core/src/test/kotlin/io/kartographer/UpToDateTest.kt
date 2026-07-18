@@ -1,6 +1,7 @@
 package io.kartographer
 
 import io.kartographer.core.*
+import io.kartographer.core.model.*
 import io.kartographer.core.scheduler.ConcurrentScheduler
 import io.kartographer.core.scheduler.TaskStateStore
 import io.kartographer.dsl.task
@@ -29,6 +30,7 @@ class UpToDateTest {
             upToDateWhen { _, _ -> true }
             action {
                 runCount++
+                Unit
             }
         }
 
@@ -38,14 +40,11 @@ class UpToDateTest {
             worker = worker
         )
 
-        val scheduler = ConcurrentScheduler(TaskRegistry.tasks)
+        val scheduler = ConcurrentScheduler(TaskRegistry.nodes)
         val result = scheduler.execute(
-            targetTask = t,
+            targetNode = t,
             context = context,
-            checkTopology = { true },
-            onTaskStart = {},
-            onTaskSuccess = {},
-            onTaskFailure = { _, _, _ -> }
+            checkTopology = { true }
         )
 
         assertTrue(result is ExecutionResult.Success)
@@ -67,6 +66,7 @@ class UpToDateTest {
             action {
                 runCount++
                 Files.writeString(output, Files.readString(input) + " processed")
+                Unit
             }
         }
 
@@ -76,28 +76,28 @@ class UpToDateTest {
             worker = worker
         )
 
-        val scheduler = ConcurrentScheduler(TaskRegistry.tasks)
+        val scheduler = ConcurrentScheduler(TaskRegistry.nodes)
 
         // 1st Execution: State doesn't exist yet, should execute
-        val result1 = scheduler.execute(t, context, { true }, {}, {}, { _, _, _ -> })
+        val result1 = scheduler.execute(t, context, { true })
         assertTrue(result1 is ExecutionResult.Success)
         assertEquals(1, runCount)
         assertTrue(Files.exists(output))
 
         // 2nd Execution: Inputs/outputs have not changed, should be skipped
-        val result2 = scheduler.execute(t, context, { true }, {}, {}, { _, _, _ -> })
+        val result2 = scheduler.execute(t, context, { true })
         assertTrue(result2 is ExecutionResult.Success)
         assertEquals(1, runCount) // count should still be 1
 
         // 3rd Execution: Modify input file, should execute again
         Files.writeString(input, "new content")
-        val result3 = scheduler.execute(t, context, { true }, {}, {}, { _, _, _ -> })
+        val result3 = scheduler.execute(t, context, { true })
         assertTrue(result3 is ExecutionResult.Success)
         assertEquals(2, runCount)
 
         // 4th Execution: Delete output file, should execute again
         Files.delete(output)
-        val result4 = scheduler.execute(t, context, { true }, {}, {}, { _, _, _ -> })
+        val result4 = scheduler.execute(t, context, { true })
         assertTrue(result4 is ExecutionResult.Success)
         assertEquals(3, runCount)
     }
@@ -110,23 +110,24 @@ class UpToDateTest {
             upToDateWhenPropertyMatches("testProp") { propVal }
             action {
                 runCount++
+                Unit
             }
         }
         val worker = Worker(WorkerId("test-worker"))
         val context = ExecutionContext(projectDir = tempDir, worker = worker)
-        val scheduler = ConcurrentScheduler(TaskRegistry.tasks)
+        val scheduler = ConcurrentScheduler(TaskRegistry.nodes)
 
         // 1st Run: executes
-        scheduler.execute(t, context, { true }, {}, {}, { _, _, _ -> })
+        scheduler.execute(t, context, { true })
         assertEquals(1, runCount)
 
         // 2nd Run: propVal hasn't changed, should be skipped
-        scheduler.execute(t, context, { true }, {}, {}, { _, _, _ -> })
+        scheduler.execute(t, context, { true })
         assertEquals(1, runCount)
 
         // 3rd Run: propVal changes, should execute
         propVal = "v2"
-        scheduler.execute(t, context, { true }, {}, {}, { _, _, _ -> })
+        scheduler.execute(t, context, { true })
         assertEquals(2, runCount)
     }
 
@@ -140,23 +141,24 @@ class UpToDateTest {
             upToDateWhenFilesMatch("custom.txt")
             action {
                 runCount++
+                Unit
             }
         }
         val worker = Worker(WorkerId("test-worker"))
         val context = ExecutionContext(projectDir = tempDir, worker = worker)
-        val scheduler = ConcurrentScheduler(TaskRegistry.tasks)
+        val scheduler = ConcurrentScheduler(TaskRegistry.nodes)
 
         // 1st Run: executes
-        scheduler.execute(t, context, { true }, {}, {}, { _, _, _ -> })
+        scheduler.execute(t, context, { true })
         assertEquals(1, runCount)
 
         // 2nd Run: content hasn't changed, skipped
-        scheduler.execute(t, context, { true }, {}, {}, { _, _, _ -> })
+        scheduler.execute(t, context, { true })
         assertEquals(1, runCount)
 
         // 3rd Run: modify custom.txt, executes
         Files.writeString(customFile, "content2")
-        scheduler.execute(t, context, { true }, {}, {}, { _, _, _ -> })
+        scheduler.execute(t, context, { true })
         assertEquals(2, runCount)
     }
 
@@ -174,23 +176,24 @@ class UpToDateTest {
             upToDateWhenInputsNewerThanOutputs()
             action {
                 runCount++
+                Unit
             }
         }
         val worker = Worker(WorkerId("test-worker"))
         val context = ExecutionContext(projectDir = tempDir, worker = worker)
-        val scheduler = ConcurrentScheduler(TaskRegistry.tasks)
+        val scheduler = ConcurrentScheduler(TaskRegistry.nodes)
 
         // Case 1: Input time is equal or older than output time (e.g. input modified at 1000, output modified at 2000)
         Files.setLastModifiedTime(input, java.nio.file.attribute.FileTime.fromMillis(1000))
         Files.setLastModifiedTime(output, java.nio.file.attribute.FileTime.fromMillis(2000))
         // Should be up-to-date and skip execution
-        scheduler.execute(t, context, { true }, {}, {}, { _, _, _ -> })
+        scheduler.execute(t, context, { true })
         assertEquals(0, runCount)
 
         // Case 2: Input time is newer than output time (e.g. input modified at 3000, output modified at 2000)
         Files.setLastModifiedTime(input, java.nio.file.attribute.FileTime.fromMillis(3000))
         // Should execute
-        scheduler.execute(t, context, { true }, {}, {}, { _, _, _ -> })
+        scheduler.execute(t, context, { true })
         assertEquals(1, runCount)
     }
 
@@ -207,32 +210,33 @@ class UpToDateTest {
             }
             action {
                 runCount++
+                Unit
             }
         }
         val worker = Worker(WorkerId("test-worker"))
         val context = ExecutionContext(projectDir = tempDir, worker = worker)
-        val scheduler = ConcurrentScheduler(TaskRegistry.tasks)
+        val scheduler = ConcurrentScheduler(TaskRegistry.nodes)
 
         // 1. First execution (prop is not set / empty)
-        scheduler.execute(t, context, { true }, {}, {}, { _, _, _ -> })
+        scheduler.execute(t, context, { true })
         assertEquals(1, runCount)
 
         // 2. Second execution (prop still not set / empty) - should skip
-        scheduler.execute(t, context, { true }, {}, {}, { _, _, _ -> })
+        scheduler.execute(t, context, { true })
         assertEquals(1, runCount)
 
         // 3. Set property - should execute
         System.setProperty("kartographer.test.prop", "value1")
-        scheduler.execute(t, context, { true }, {}, {}, { _, _, _ -> })
+        scheduler.execute(t, context, { true })
         assertEquals(2, runCount)
 
         // 4. Property is same - should skip
-        scheduler.execute(t, context, { true }, {}, {}, { _, _, _ -> })
+        scheduler.execute(t, context, { true })
         assertEquals(2, runCount)
 
         // 5. Change property - should execute
         System.setProperty("kartographer.test.prop", "value2")
-        scheduler.execute(t, context, { true }, {}, {}, { _, _, _ -> })
+        scheduler.execute(t, context, { true })
         assertEquals(3, runCount)
 
         System.clearProperty("kartographer.test.prop")

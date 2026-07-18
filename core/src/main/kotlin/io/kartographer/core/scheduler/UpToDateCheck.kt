@@ -1,7 +1,7 @@
 package io.kartographer.core.scheduler
 
-import io.kartographer.core.Task
-import io.kartographer.core.ExecutionContext
+import io.kartographer.core.model.Task
+import io.kartographer.core.model.ExecutionContext
 import java.nio.file.Files
 import kotlin.streams.asSequence
 

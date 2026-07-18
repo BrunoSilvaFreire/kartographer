@@ -1,8 +1,9 @@
 package io.kartographer
 
 import io.kartographer.tasks.DefaultTask
-import io.kartographer.tasks.ExecTask
+
 import io.kartographer.core.*
+import io.kartographer.core.model.*
 import io.kartographer.core.scheduler.CycleDetectedException
 import io.kartographer.core.scheduler.DagScheduler
 import io.kartographer.core.scheduler.MissingDependencyException
@@ -31,7 +32,7 @@ class KartographerTest {
             dependsOn(b)
         }
 
-        val scheduler = DagScheduler(TaskRegistry.tasks)
+        val scheduler = DagScheduler(TaskRegistry.nodes)
         val order = scheduler.getExecutionOrder()
 
         assertEquals(3, order.size)
@@ -49,7 +50,7 @@ class KartographerTest {
         // Force cycle B -> A -> B
         a.dependsOn(b)
 
-        val scheduler = DagScheduler(TaskRegistry.tasks)
+        val scheduler = DagScheduler(TaskRegistry.nodes)
         val exception = assertThrows(CycleDetectedException::class.java) {
             scheduler.getExecutionOrder()
         }
@@ -62,7 +63,7 @@ class KartographerTest {
             dependsOn("nonexistent")
         }
 
-        val scheduler = DagScheduler(TaskRegistry.tasks)
+        val scheduler = DagScheduler(TaskRegistry.nodes)
         val exception = assertThrows(MissingDependencyException::class.java) {
             scheduler.getExecutionOrder()
         }
@@ -71,17 +72,20 @@ class KartographerTest {
 
     @Test
     fun testLocalCommandSuccess() = runBlocking {
-        val task = task<ExecTask>("successTask") {
-            local {
-                exec("echo 'Success'")
+        val task = task<DefaultTask>("successTask") {
+            action { context ->
+                context.executeBash {
+                    command("echo")
+                    args("'Success'")
+                }
             }
         }
 
         val worker = Worker(WorkerId("test-worker"))
         val context = ExecutionContext(
             projectDir = Paths.get("").toAbsolutePath(),
-            worker = worker
-        )
+            worker = worker,
+        ).let { it.copy(executionEnvironment = io.kartographer.local.HostExecutionEnvironment(it)) }
 
         val result = task.execute(context)
         assertTrue(result is ExecutionResult.Success)
@@ -89,17 +93,20 @@ class KartographerTest {
 
     @Test
     fun testLocalCommandFailure() = runBlocking {
-        val task = task<ExecTask>("failureTask") {
-            local {
-                exec("exit 42")
+        val task = task<DefaultTask>("failureTask") {
+            action { context ->
+                context.executeBash {
+                    command("exit")
+                    args("42")
+                }
             }
         }
 
         val worker = Worker(WorkerId("test-worker"))
         val context = ExecutionContext(
             projectDir = Paths.get("").toAbsolutePath(),
-            worker = worker
-        )
+            worker = worker,
+        ).let { it.copy(executionEnvironment = io.kartographer.local.HostExecutionEnvironment(it)) }
 
         val result = task.execute(context)
         assertTrue(result is ExecutionResult.Failure)
@@ -109,12 +116,12 @@ class KartographerTest {
 
     @Test
     fun testDSLBuildsExpectedTaskGraph() {
-        val first = task<ExecTask>("first") {
+        val first = task<DefaultTask>("first") {
             inputs.file("src/main.kt")
             outputs.dir("build/out")
         }
 
-        val second = task<ExecTask>("second") {
+        val second = task<DefaultTask>("second") {
             dependsOn(first)
             dependsOn("non-existent-yet")
         }

@@ -4,11 +4,11 @@ import io.cucumber.java.en.Given
 import io.cucumber.java.en.When
 import io.cucumber.java.en.Then
 import io.kartographer.core.*
+import io.kartographer.core.model.*
 import io.kartographer.core.scheduler.ConcurrentScheduler
-import io.kartographer.tasks.go.GoBuild
+import io.kartographer.tasks.go.*
 import io.kartographer.tasks.proto.ProtoCompile
 import io.kartographer.tasks.gradle.GradleTask
-import io.kartographer.tasks.ExecTask
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Files
 import java.nio.file.Path
@@ -25,6 +25,14 @@ class StepDefinitions {
     private var projectDir: Path? = null
     private var executionTimeMs: Long = 0
     private val customPropertyValues = mutableMapOf<String, String>()
+    private val capturedCommands = mutableListOf<String>()
+    
+    private val mockExecutionEnv = object : ExecutionEnvironment {
+        override suspend fun execute(command: String, workingDir: String, environment: Map<String, String>, requiresElevation: Boolean): Int {
+            capturedCommands.add(command)
+            return 0
+        }
+    }
 
     // Mock Tasks for execution simulations
     inner class TestDefaultTask(
@@ -111,21 +119,20 @@ class StepDefinitions {
         val scheduler = ConcurrentScheduler(tasks.mapKeys { it.value.id })
         val start = System.currentTimeMillis()
         executionResult = scheduler.execute(
-            targetTask = target,
+            targetNode = target,
             context = context,
-            checkTopology = { task ->
-                task.topologyRequirements.all { req ->
-                    when (req) {
-                        is TopologyRequirement.LocalOnly -> true
-                        is TopologyRequirement.RequiresLabel -> activeWorker.labels[req.key] == req.value
-                        is TopologyRequirement.RequiresCapability -> activeWorker.capabilities.contains(req.capability)
-                        is TopologyRequirement.PrefersLabel -> true
+            checkTopology = { node ->
+                if (node !is Task) true else {
+                    node.topologyRequirements.all { req ->
+                        when (req) {
+                            is TopologyRequirement.LocalOnly -> true
+                            is TopologyRequirement.RequiresLabel -> activeWorker.labels[req.key] == req.value
+                            is TopologyRequirement.RequiresCapability -> activeWorker.capabilities.contains(req.capability)
+                            is TopologyRequirement.PrefersLabel -> true
+                        }
                     }
                 }
-            },
-            onTaskStart = {},
-            onTaskSuccess = {},
-            onTaskFailure = { _, _, _ -> }
+            }
         )
         executionTimeMs = System.currentTimeMillis() - start
     }
@@ -327,8 +334,9 @@ class StepDefinitions {
         val context = ExecutionContext(
             projectDir = projectDir ?: Files.createTempDirectory("kartographer-cucumber-dry"),
             worker = Worker(WorkerId("test-worker"), capabilities = setOf("go")),
-            dryRun = true
+            executionEnvironment = mockExecutionEnv
         )
+        capturedCommands.clear()
         executionResult = task.execute(context)
     }
 
@@ -336,8 +344,7 @@ class StepDefinitions {
     fun then_command_starts_with(expectedStart: String) {
         val result = executionResult
         assertTrue(result is ExecutionResult.Success)
-        val task = tasks.values.first() as ExecTask
-        val cmd = task.commands.firstOrNull()
+        val cmd = capturedCommands.firstOrNull()
         assertNotNull(cmd, "No command was generated")
         assertTrue(cmd.startsWith(expectedStart), "Command '$cmd' did not start with '$expectedStart'")
     }
@@ -357,15 +364,15 @@ class StepDefinitions {
         val context = ExecutionContext(
             projectDir = projectDir ?: Files.createTempDirectory("kartographer-cucumber-dry"),
             worker = Worker(WorkerId("test-worker"), capabilities = setOf("protoc")),
-            dryRun = true
+            executionEnvironment = mockExecutionEnv
         )
+        capturedCommands.clear()
         executionResult = task.execute(context)
     }
 
     @Then("the executed command should end with {string}")
     fun then_command_ends_with(expectedEnd: String) {
-        val task = tasks.values.first() as ExecTask
-        val cmd = task.commands.firstOrNull()
+        val cmd = capturedCommands.firstOrNull()
         assertNotNull(cmd, "No command was generated")
         assertTrue(cmd.endsWith(expectedEnd), "Command '$cmd' did not end with '$expectedEnd'")
     }
@@ -386,8 +393,140 @@ class StepDefinitions {
         val context = ExecutionContext(
             projectDir = projectDir ?: Files.createTempDirectory("kartographer-cucumber-dry"),
             worker = Worker(WorkerId("test-worker")),
-            dryRun = true
+            executionEnvironment = mockExecutionEnv
         )
+        capturedCommands.clear()
         executionResult = task.execute(context)
+    }
+
+    @Given("a GoBuild task named {string} with environment {string}")
+    fun given_gobuild_env(name: String, envStr: String) {
+        val task = GoBuild(name)
+        envStr.split(",").map { it.trim() }.forEach {
+            val parts = it.split("=")
+            task.environment[parts[0]] = parts[1]
+        }
+        tasks[name] = task
+    }
+
+    @Given("a GoTest task named {string} with packages {string}")
+    fun given_gotest_task(name: String, packagesStr: String) {
+        val task = io.kartographer.tasks.go.GoTest(name)
+        task.packages.clear()
+        task.packages.addAll(packagesStr.split(",").map { it.trim() })
+        tasks[name] = task
+    }
+
+    @When("we dry-run the GoTest task {string}")
+    fun when_dry_run_gotest(name: String) = runBlocking {
+        val task = tasks[name] as io.kartographer.tasks.go.GoTest
+        val context = ExecutionContext(
+            projectDir = projectDir ?: Files.createTempDirectory("kartographer-cucumber-dry"),
+            worker = Worker(WorkerId("test-worker"), capabilities = setOf("go")),
+            executionEnvironment = mockExecutionEnv
+        )
+        capturedCommands.clear()
+        executionResult = task.execute(context)
+    }
+
+    @Given("a GoMod task named {string} with action {string}")
+    fun given_gomod_task(name: String, action: String) {
+        val task = io.kartographer.tasks.go.GoMod(name)
+        task.action = action
+        tasks[name] = task
+    }
+
+    @When("we dry-run the GoMod task {string}")
+    fun when_dry_run_gomod(name: String) = runBlocking {
+        val task = tasks[name] as io.kartographer.tasks.go.GoMod
+        val context = ExecutionContext(
+            projectDir = projectDir ?: Files.createTempDirectory("kartographer-cucumber-dry"),
+            worker = Worker(WorkerId("test-worker"), capabilities = setOf("go")),
+            executionEnvironment = mockExecutionEnv
+        )
+        capturedCommands.clear()
+        executionResult = task.execute(context)
+    }
+
+    @Given("a ProtoCompile task named {string} with goGrpcOut {string}, pythonOut {string}, javaOut {string}, extraArgs {string}, and files {string}")
+    fun given_protocompile_complex(name: String, goGrpc: String, pyOut: String, jOut: String, extra: String, files: String) {
+        val task = ProtoCompile(name)
+        task.goGrpcOut = goGrpc
+        task.pythonOut = pyOut
+        task.javaOut = jOut
+        task.extraArgs.addAll(extra.split(",").map { it.trim() })
+        task.protoFiles.addAll(files.split(",").map { it.trim() })
+        tasks[name] = task
+    }
+
+    @Given("a ProtoCompile task named {string} with no proto files")
+    fun given_protocompile_no_files(name: String) {
+        val task = ProtoCompile(name)
+        tasks[name] = task
+    }
+
+    @When("we dry-run the ProtoCompile task {string} and expect failure")
+    fun when_dry_run_proto_fail(name: String) = runBlocking {
+        val task = tasks[name] as ProtoCompile
+        val context = ExecutionContext(
+            projectDir = projectDir ?: Files.createTempDirectory("kartographer-cucumber-dry"),
+            worker = Worker(WorkerId("test-worker"), capabilities = setOf("protoc")),
+            executionEnvironment = mockExecutionEnv
+        )
+        capturedCommands.clear()
+        executionResult = task.execute(context)
+    }
+
+    @Then("the task execution should fail with IllegalArgumentException")
+    fun then_task_fails_illegal_arg() {
+        val res = executionResult
+        assertTrue(res is ExecutionResult.Failure, "Expected failure but got $res")
+        assertTrue(res.error is IllegalArgumentException, "Expected IllegalArgumentException but got ${res.error}")
+    }
+
+    @Given("a GradleTask named {string} with extraArgs {string}, not using wrapper, and tasks {string}")
+    fun given_gradletask_extra(name: String, extra: String, tasksStr: String) {
+        val task = GradleTask(name)
+        task.useWrapper = false
+        task.extraArgs.addAll(extra.split(",").map { it.trim() })
+        task.tasks.addAll(tasksStr.split(",").map { it.trim() })
+        tasks[name] = task
+    }
+
+    @Given("a GradleTask named {string} with no tasks")
+    fun given_gradletask_no_tasks(name: String) {
+        val task = GradleTask(name)
+        tasks[name] = task
+    }
+
+    @When("we dry-run the GradleTask {string} and expect failure")
+    fun when_dry_run_gradle_fail(name: String) = runBlocking {
+        val task = tasks[name] as GradleTask
+        val context = ExecutionContext(
+            projectDir = projectDir ?: Files.createTempDirectory("kartographer-cucumber-dry"),
+            worker = Worker(WorkerId("test-worker")),
+            executionEnvironment = mockExecutionEnv
+        )
+        capturedCommands.clear()
+        executionResult = task.execute(context)
+    }
+
+    @Given("a GoTest task named {string} with default packages")
+    fun given_gotest_default(name: String) {
+        val task = io.kartographer.tasks.go.GoTest(name)
+        tasks[name] = task
+    }
+
+    @When("we dry-run a custom Go command with no command name")
+    fun when_dry_run_custom_go() = runBlocking {
+        val context = ExecutionContext(
+            projectDir = projectDir ?: Files.createTempDirectory("kartographer-cucumber-dry"),
+            worker = Worker(WorkerId("test-worker"), capabilities = setOf("go")),
+            executionEnvironment = mockExecutionEnv
+        )
+        capturedCommands.clear()
+        executionResult = context.executeGo {
+            arg("version")
+        }
     }
 }

@@ -1,0 +1,215 @@
+2026-07-11 15:38:29
+Full thread dump OpenJDK 64-Bit Server VM (21.0.2+13-58 mixed mode, sharing):
+
+Threads class SMR info:
+_java_thread_list=0x00007fb650001ac0, length=16, elements={
+0x00007fb6e8029ac0, 0x00007fb6e8165ac0, 0x00007fb6e8167230, 0x00007fb6e8168d10,
+0x00007fb6e816a350, 0x00007fb6e816b8f0, 0x00007fb6e816d4b0, 0x00007fb6e816eb70,
+0x00007fb6e817d700, 0x00007fb6e81816f0, 0x00007fb6e861a890, 0x00007fb6eae47ac0,
+0x00007fb6eae481d0, 0x00007fb5ac002540, 0x00007fb5e05a6cb0, 0x00007fb650000f50
+}
+
+"main" #1 [2356003] prio=5 os_prio=0 cpu=2941.69ms elapsed=69.75s tid=0x00007fb6e8029ac0 nid=2356003 runnable  [0x00007fb6ef7fd000]
+   java.lang.Thread.State: RUNNABLE
+	at java.io.FileInputStream.readBytes(java.base@21.0.2/Native Method)
+	at java.io.FileInputStream.read(java.base@21.0.2/FileInputStream.java:287)
+	at sun.nio.cs.StreamDecoder.readBytes(java.base@21.0.2/StreamDecoder.java:329)
+	at sun.nio.cs.StreamDecoder.implRead(java.base@21.0.2/StreamDecoder.java:372)
+	at sun.nio.cs.StreamDecoder.lockedRead(java.base@21.0.2/StreamDecoder.java:215)
+	at sun.nio.cs.StreamDecoder.read(java.base@21.0.2/StreamDecoder.java:175)
+	- locked <0x0000000611ede498> (a java.lang.Object)
+	at jdk.internal.io.JdkConsoleImpl$LineReader.read(java.base@21.0.2/JdkConsoleImpl.java:253)
+	- locked <0x0000000611ede498> (a java.lang.Object)
+	at jdk.internal.io.JdkConsoleImpl.readline(java.base@21.0.2/JdkConsoleImpl.java:183)
+	at jdk.internal.io.JdkConsoleImpl.readPassword(java.base@21.0.2/JdkConsoleImpl.java:109)
+	- locked <0x0000000611ede498> (a java.lang.Object)
+	- locked <0x0000000611ede4a8> (a java.lang.Object)
+	at java.io.ProxyingConsole.readPassword(java.base@21.0.2/ProxyingConsole.java:117)
+	- locked <0x0000000611ee18b0> (a java.lang.Object)
+	- locked <0x0000000611ee18c0> (a java.lang.Object)
+	at io.kartographer.local.ConsoleUserPrompter.prompt(LocalExecution.kt:16)
+	at io.kartographer.local.HostExecutionEnvironment.execute(LocalExecution.kt:50)
+	at io.kartographer.tasks.ExecTask.execute$suspendImpl(Tasks.kt:54)
+	at io.kartographer.tasks.ExecTask.execute(Tasks.kt)
+	at io.kartographer.tasks.containers.ContainerBuild.execute$suspendImpl(ContainerTasks.kt:42)
+	at io.kartographer.tasks.containers.ContainerBuild.execute(ContainerTasks.kt)
+	at io.kartographer.core.scheduler.ConcurrentScheduler$execute$2$checkAndSpawnReady$1$1$job$1.invokeSuspend(ConcurrentScheduler.kt:123)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:33)
+	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:104)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:277)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:95)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:69)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:48)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source)
+	at io.kartographer.cli.RunCommand.run(Main.kt:113)
+	at com.github.ajalt.clikt.parsers.Parser.finalizeAndRun(Parser.kt:348)
+	at com.github.ajalt.clikt.parsers.Parser.parse(Parser.kt:218)
+	at com.github.ajalt.clikt.parsers.Parser.parse(Parser.kt:245)
+	at com.github.ajalt.clikt.parsers.Parser.parse(Parser.kt:42)
+	at com.github.ajalt.clikt.core.CliktCommand.parse(CliktCommand.kt:457)
+	at com.github.ajalt.clikt.core.CliktCommand.parse$default(CliktCommand.kt:454)
+	at com.github.ajalt.clikt.core.CliktCommand.main(CliktCommand.kt:474)
+	at com.github.ajalt.clikt.core.CliktCommand.main(CliktCommand.kt:481)
+	at io.kartographer.cli.MainKt.main(Main.kt:219)
+
+"Reference Handler" #9 [2356011] daemon prio=10 os_prio=0 cpu=1.47ms elapsed=69.73s tid=0x00007fb6e8165ac0 nid=2356011 waiting on condition  [0x00007fb6b961a000]
+   java.lang.Thread.State: RUNNABLE
+	at java.lang.ref.Reference.waitForReferencePendingList(java.base@21.0.2/Native Method)
+	at java.lang.ref.Reference.processPendingReferences(java.base@21.0.2/Reference.java:246)
+	at java.lang.ref.Reference$ReferenceHandler.run(java.base@21.0.2/Reference.java:208)
+
+"Finalizer" #10 [2356012] daemon prio=8 os_prio=0 cpu=0.14ms elapsed=69.73s tid=0x00007fb6e8167230 nid=2356012 in Object.wait()  [0x00007fb6b91fe000]
+   java.lang.Thread.State: WAITING (on object monitor)
+	at java.lang.Object.wait0(java.base@21.0.2/Native Method)
+	- waiting on <0x000000060e8731a0> (a java.lang.ref.NativeReferenceQueue$Lock)
+	at java.lang.Object.wait(java.base@21.0.2/Object.java:366)
+	at java.lang.Object.wait(java.base@21.0.2/Object.java:339)
+	at java.lang.ref.NativeReferenceQueue.await(java.base@21.0.2/NativeReferenceQueue.java:48)
+	at java.lang.ref.ReferenceQueue.remove0(java.base@21.0.2/ReferenceQueue.java:158)
+	at java.lang.ref.NativeReferenceQueue.remove(java.base@21.0.2/NativeReferenceQueue.java:89)
+	- locked <0x000000060e8731a0> (a java.lang.ref.NativeReferenceQueue$Lock)
+	at java.lang.ref.Finalizer$FinalizerThread.run(java.base@21.0.2/Finalizer.java:173)
+
+"Signal Dispatcher" #11 [2356013] daemon prio=9 os_prio=0 cpu=0.31ms elapsed=69.73s tid=0x00007fb6e8168d10 nid=2356013 waiting on condition  [0x0000000000000000]
+   java.lang.Thread.State: RUNNABLE
+
+"Service Thread" #12 [2356014] daemon prio=9 os_prio=0 cpu=1.20ms elapsed=69.73s tid=0x00007fb6e816a350 nid=2356014 runnable  [0x0000000000000000]
+   java.lang.Thread.State: RUNNABLE
+
+"Monitor Deflation Thread" #13 [2356015] daemon prio=9 os_prio=0 cpu=3.73ms elapsed=69.73s tid=0x00007fb6e816b8f0 nid=2356015 runnable  [0x0000000000000000]
+   java.lang.Thread.State: RUNNABLE
+
+"C2 CompilerThread0" #14 [2356016] daemon prio=9 os_prio=0 cpu=1238.35ms elapsed=69.73s tid=0x00007fb6e816d4b0 nid=2356016 waiting on condition  [0x0000000000000000]
+   java.lang.Thread.State: RUNNABLE
+   No compile task
+
+"C1 CompilerThread0" #22 [2356017] daemon prio=9 os_prio=0 cpu=538.83ms elapsed=69.73s tid=0x00007fb6e816eb70 nid=2356017 waiting on condition  [0x0000000000000000]
+   java.lang.Thread.State: RUNNABLE
+   No compile task
+
+"Notification Thread" #26 [2356018] daemon prio=9 os_prio=0 cpu=0.06ms elapsed=69.72s tid=0x00007fb6e817d700 nid=2356018 runnable  [0x0000000000000000]
+   java.lang.Thread.State: RUNNABLE
+
+"Common-Cleaner" #27 [2356019] daemon prio=8 os_prio=0 cpu=1.60ms elapsed=69.72s tid=0x00007fb6e81816f0 nid=2356019 waiting on condition  [0x00007fb6b8a27000]
+   java.lang.Thread.State: TIMED_WAITING (parking)
+	at jdk.internal.misc.Unsafe.park(java.base@21.0.2/Native Method)
+	- parking to wait for  <0x000000060e877a90> (a java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject)
+	at java.util.concurrent.locks.LockSupport.parkNanos(java.base@21.0.2/LockSupport.java:269)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(java.base@21.0.2/AbstractQueuedSynchronizer.java:1847)
+	at java.lang.ref.ReferenceQueue.await(java.base@21.0.2/ReferenceQueue.java:71)
+	at java.lang.ref.ReferenceQueue.remove0(java.base@21.0.2/ReferenceQueue.java:143)
+	at java.lang.ref.ReferenceQueue.remove(java.base@21.0.2/ReferenceQueue.java:218)
+	at jdk.internal.ref.CleanerImpl.run(java.base@21.0.2/CleanerImpl.java:140)
+	at java.lang.Thread.runWith(java.base@21.0.2/Thread.java:1596)
+	at java.lang.Thread.run(java.base@21.0.2/Thread.java:1583)
+	at jdk.internal.misc.InnocuousThread.run(java.base@21.0.2/InnocuousThread.java:186)
+
+"JNA Cleaner" #30 [2356025] daemon prio=5 os_prio=0 cpu=0.58ms elapsed=69.51s tid=0x00007fb6e861a890 nid=2356025 waiting on condition  [0x00007fb6b83fe000]
+   java.lang.Thread.State: TIMED_WAITING (parking)
+	at jdk.internal.misc.Unsafe.park(java.base@21.0.2/Native Method)
+	- parking to wait for  <0x000000060e87d598> (a java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject)
+	at java.util.concurrent.locks.LockSupport.parkNanos(java.base@21.0.2/LockSupport.java:269)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(java.base@21.0.2/AbstractQueuedSynchronizer.java:1847)
+	at java.lang.ref.ReferenceQueue.await(java.base@21.0.2/ReferenceQueue.java:71)
+	at java.lang.ref.ReferenceQueue.remove0(java.base@21.0.2/ReferenceQueue.java:143)
+	at java.lang.ref.ReferenceQueue.remove(java.base@21.0.2/ReferenceQueue.java:218)
+	at com.sun.jna.internal.Cleaner$CleanerThread.run(Cleaner.java:154)
+
+"DefaultDispatcher-worker-1" #52 [2356154] daemon prio=5 os_prio=0 cpu=68.58ms elapsed=66.59s tid=0x00007fb6eae47ac0 nid=2356154 waiting on condition  [0x00007fb6660f9000]
+   java.lang.Thread.State: TIMED_WAITING (parking)
+	at jdk.internal.misc.Unsafe.park(java.base@21.0.2/Native Method)
+	at java.util.concurrent.locks.LockSupport.parkNanos(java.base@21.0.2/LockSupport.java:410)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.park(CoroutineScheduler.kt:847)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.tryPark(CoroutineScheduler.kt:792)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.runWorker(CoroutineScheduler.kt:740)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.run(CoroutineScheduler.kt:693)
+
+"DefaultDispatcher-worker-2" #53 [2356155] daemon prio=5 os_prio=0 cpu=14.02ms elapsed=66.59s tid=0x00007fb6eae481d0 nid=2356155 waiting on condition  [0x00007fb6657f0000]
+   java.lang.Thread.State: TIMED_WAITING (parking)
+	at jdk.internal.misc.Unsafe.park(java.base@21.0.2/Native Method)
+	at java.util.concurrent.locks.LockSupport.parkNanos(java.base@21.0.2/LockSupport.java:410)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.park(CoroutineScheduler.kt:847)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.tryPark(CoroutineScheduler.kt:792)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.runWorker(CoroutineScheduler.kt:740)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.run(CoroutineScheduler.kt:693)
+
+"DefaultDispatcher-worker-3" #56 [2356176] daemon prio=5 os_prio=0 cpu=0.50ms elapsed=66.52s tid=0x00007fb5ac002540 nid=2356176 waiting on condition  [0x00007fb6655ee000]
+   java.lang.Thread.State: TIMED_WAITING (parking)
+	at jdk.internal.misc.Unsafe.park(java.base@21.0.2/Native Method)
+	at java.util.concurrent.locks.LockSupport.parkNanos(java.base@21.0.2/LockSupport.java:410)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.park(CoroutineScheduler.kt:847)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.tryPark(CoroutineScheduler.kt:792)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.runWorker(CoroutineScheduler.kt:740)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.run(CoroutineScheduler.kt:693)
+
+"DefaultDispatcher-worker-4" #57 [2356177] daemon prio=5 os_prio=0 cpu=0.48ms elapsed=66.52s tid=0x00007fb5e05a6cb0 nid=2356177 waiting on condition  [0x00007fb6651fe000]
+   java.lang.Thread.State: TIMED_WAITING (parking)
+	at jdk.internal.misc.Unsafe.park(java.base@21.0.2/Native Method)
+	at java.util.concurrent.locks.LockSupport.parkNanos(java.base@21.0.2/LockSupport.java:410)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.park(CoroutineScheduler.kt:847)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.tryPark(CoroutineScheduler.kt:792)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.runWorker(CoroutineScheduler.kt:740)
+	at kotlinx.coroutines.scheduling.CoroutineScheduler$Worker.run(CoroutineScheduler.kt:693)
+
+"Attach Listener" #58 [2357517] daemon prio=9 os_prio=0 cpu=0.29ms elapsed=6.01s tid=0x00007fb650000f50 nid=2357517 waiting on condition  [0x0000000000000000]
+   java.lang.Thread.State: RUNNABLE
+
+"VM Thread" os_prio=0 cpu=16.99ms elapsed=69.73s tid=0x00007fb6e8154cc0 nid=2356010 runnable  
+
+"GC Thread#0" os_prio=0 cpu=16.91ms elapsed=69.75s tid=0x00007fb6e80569f0 nid=2356004 runnable  
+
+"GC Thread#1" os_prio=0 cpu=14.33ms elapsed=69.43s tid=0x00007fb66000a650 nid=2356028 runnable  
+
+"GC Thread#2" os_prio=0 cpu=25.35ms elapsed=69.43s tid=0x00007fb66000b060 nid=2356029 runnable  
+
+"GC Thread#3" os_prio=0 cpu=9.11ms elapsed=69.43s tid=0x00007fb66000ba70 nid=2356030 runnable  
+
+"GC Thread#4" os_prio=0 cpu=12.66ms elapsed=69.43s tid=0x00007fb66000c480 nid=2356031 runnable  
+
+"GC Thread#5" os_prio=0 cpu=18.70ms elapsed=69.43s tid=0x00007fb66000ce90 nid=2356032 runnable  
+
+"GC Thread#6" os_prio=0 cpu=17.44ms elapsed=69.43s tid=0x00007fb66000d8d0 nid=2356033 runnable  
+
+"GC Thread#7" os_prio=0 cpu=18.62ms elapsed=69.43s tid=0x00007fb66000e310 nid=2356034 runnable  
+
+"GC Thread#8" os_prio=0 cpu=13.79ms elapsed=69.43s tid=0x00007fb66000ed50 nid=2356035 runnable  
+
+"GC Thread#9" os_prio=0 cpu=9.01ms elapsed=69.43s tid=0x00007fb66000f880 nid=2356036 runnable  
+
+"GC Thread#10" os_prio=0 cpu=17.54ms elapsed=69.43s tid=0x00007fb6600103d0 nid=2356037 runnable  
+
+"GC Thread#11" os_prio=0 cpu=15.78ms elapsed=69.43s tid=0x00007fb660010f20 nid=2356038 runnable  
+
+"GC Thread#12" os_prio=0 cpu=34.06ms elapsed=68.55s tid=0x00007fb66001c8d0 nid=2356066 runnable  
+
+"GC Thread#13" os_prio=0 cpu=1.51ms elapsed=68.55s tid=0x00007fb66001cf70 nid=2356067 runnable  
+
+"GC Thread#14" os_prio=0 cpu=4.51ms elapsed=68.46s tid=0x00007fb660013910 nid=2356082 runnable  
+
+"GC Thread#15" os_prio=0 cpu=9.49ms elapsed=68.46s tid=0x00007fb66001e130 nid=2356083 runnable  
+
+"GC Thread#16" os_prio=0 cpu=6.44ms elapsed=68.09s tid=0x00007fb63041a840 nid=2356120 runnable  
+
+"GC Thread#17" os_prio=0 cpu=8.55ms elapsed=68.09s tid=0x00007fb66001f7f0 nid=2356121 runnable  
+
+"G1 Main Marker" os_prio=0 cpu=0.80ms elapsed=69.75s tid=0x00007fb6e8067920 nid=2356005 runnable  
+
+"G1 Conc#0" os_prio=0 cpu=17.96ms elapsed=69.75s tid=0x00007fb6e80688f0 nid=2356006 runnable  
+
+"G1 Conc#1" os_prio=0 cpu=22.25ms elapsed=68.95s tid=0x00007fb6bc000cf0 nid=2356059 runnable  
+
+"G1 Conc#2" os_prio=0 cpu=19.98ms elapsed=68.95s tid=0x00007fb6bc001810 nid=2356060 runnable  
+
+"G1 Conc#3" os_prio=0 cpu=23.12ms elapsed=68.95s tid=0x00007fb6bc002330 nid=2356061 runnable  
+
+"G1 Conc#4" os_prio=0 cpu=20.15ms elapsed=68.95s tid=0x00007fb6bc002e80 nid=2356062 runnable  
+
+"G1 Refine#0" os_prio=0 cpu=10.90ms elapsed=69.75s tid=0x00007fb6e811f280 nid=2356007 runnable  
+
+"G1 Service" os_prio=0 cpu=6.37ms elapsed=69.75s tid=0x00007fb6e8120230 nid=2356008 runnable  
+
+"VM Periodic Task Thread" os_prio=0 cpu=15.75ms elapsed=69.74s tid=0x00007fb6e8139e00 nid=2356009 waiting on condition  
+
+JNI global refs: 19, weak refs: 45
+
