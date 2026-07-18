@@ -305,7 +305,10 @@ class RunCommand : CliktCommand(
         }
         
         val sudoTasks = executionSet.filterIsInstance<Task>().filter { it.requiresElevation }
-        if (sudoTasks.isNotEmpty() && !System.getProperty("os.name").lowercase().contains("win")) {
+        // Already root (whole run wrapped in `llm-sudo <karto> ...`): sudo needs
+        // no password, and prompting would block non-interactive runs.
+        val alreadyRoot = System.getenv("USER") == "root" || System.getProperty("user.name") == "root"
+        if (sudoTasks.isNotEmpty() && !alreadyRoot && !System.getProperty("os.name").lowercase().contains("win")) {
             println("================================================================")
             println("🔒 PRIVILEGE ESCALATION REQUIRED")
             println("----------------------------------------------------------------")
@@ -416,7 +419,10 @@ fun main(args: Array<String>) {
         if (arg.startsWith("--") && arg !in knownOptions && hasRun) {
             val propName = arg.substring(2)
             newArgs.add("-P")
-            if (i + 1 < args.size && !args[i + 1].startsWith("-")) {
+            if (propName.contains('=')) {
+                // --name=value form: already a complete assignment.
+                newArgs.add(propName)
+            } else if (i + 1 < args.size && !args[i + 1].startsWith("-")) {
                 newArgs.add("$propName=${args[++i]}")
             } else {
                 newArgs.add("$propName=true")

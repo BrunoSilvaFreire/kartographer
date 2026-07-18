@@ -46,7 +46,13 @@ class HostExecutionEnvironment(val context: ExecutionContext) : ExecutionEnviron
         }
         
         var finalCommand = command
-        if (requiresElevation && !System.getProperty("os.name").lowercase().contains("win")) {
+        // Already root (e.g. the whole karto run is wrapped in `llm-sudo`):
+        // sudo needs no password, and prompting would block non-interactive runs.
+        val alreadyRoot = System.getProperty("user.name") == "root"
+        if (requiresElevation && alreadyRoot) {
+            val escapedCommand = command.replace("\"", "\\\"")
+            finalCommand = "sudo sh -c \"$escapedCommand\""
+        } else if (requiresElevation && !System.getProperty("os.name").lowercase().contains("win")) {
             val password = (context.variables["SUDO_PASSWORD"] as? String) 
                 ?: context.prompter.prompt("Password for sudo: ", secret = true).also {
                     context.variables["SUDO_PASSWORD"] = it

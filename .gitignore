@@ -6,3 +6,6 @@ out/
 *.ipr
 *.iws
 .kartographer/
+.llm-sudo-session
+pilots/
+coverage/

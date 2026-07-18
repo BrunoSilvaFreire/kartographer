@@ -5,6 +5,8 @@ import io.kartographer.core.model.ExecutionContext
 import io.kartographer.core.model.ExecutionResult
 import io.kartographer.core.model.executeBash
 
+// Elevation is not handled per-client: when a run needs privileges, wrap the
+// whole invocation as `llm-sudo <karto> ...` so karto itself runs under sudo.
 enum class ContainerClient(val command: String, val rootful: Boolean) {
     DOCKER("docker", false),
     NERDCTL("nerdctl", false),
@@ -22,6 +24,7 @@ open class ContainerBuild(name: String) : DefaultTask(name) {
     val containerClient = property<ContainerClient> { set(ContainerClient.DOCKER) }
     val version = property<String>().withCLI("version", "Override the build version")
     val namespace = property<String>()
+    val buildArgs = property<Map<String, String>>()
 
     override val requiresElevation: Boolean get() = containerClient.get().rootful
 
@@ -41,6 +44,9 @@ open class ContainerBuild(name: String) : DefaultTask(name) {
                 args("--namespace", namespace.get())
             }
             args("build", "-t", fullImageName, "-f", containerfile.get())
+            if (buildArgs.isPresent()) {
+                buildArgs.get().forEach { (k, v) -> args("--build-arg", "$k=$v") }
+            }
             if (platform.isPresent()) {
                 args("--platform", platform.get())
             }

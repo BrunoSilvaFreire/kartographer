@@ -18,6 +18,7 @@ dependencies {
     implementation(project(":tasks:gradle"))
     implementation(project(":tasks:proto"))
     implementation(project(":tasks:ansible"))
+    implementation(project(":tasks:pulumi"))
     implementation("com.github.ajalt.clikt:clikt:4.4.0")
     implementation("com.jakewharton.mosaic:mosaic-runtime:0.11.0")
     implementation("com.fasterxml.jackson.core:jackson-databind:2.15.2")
