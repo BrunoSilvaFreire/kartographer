@@ -1,3 +1,4 @@
+@local_plugin
 Feature: Local Plugin Dynamic Compilation and Reloading
   Verify that compiling and reloading local plugin tasks works dynamically
   and updates property changes immediately when running pipeline scripts.
@@ -15,3 +16,16 @@ Feature: Local Plugin Dynamic Compilation and Reloading
     When we modify the custom local plugin task "CustomSampleTask" property "sampleRate" default value to 20
     And we load and execute the pipeline script "pipeline.kts" again
     Then the task "sample" should have property "sampleRate" with value 20
+
+  Scenario: Locally compiled plugin takes precedence over a stale global plugin jar
+    Given a temporary project directory
+    And a custom local plugin with a task "CustomSampleTask" that has property "sampleRate" defaulting to 10
+    When we load and execute the pipeline script "pipeline.kts" defining:
+      """
+      import io.kartographer.tasks.custom.*
+      task<CustomSampleTask>("sample") {}
+      """
+    And the compiled local plugin jar is installed as a global plugin
+    And we modify the custom local plugin task "CustomSampleTask" property "sampleRate" default value to 30
+    And we load and execute the pipeline script "pipeline.kts" again
+    Then the task "sample" should have property "sampleRate" with value 30

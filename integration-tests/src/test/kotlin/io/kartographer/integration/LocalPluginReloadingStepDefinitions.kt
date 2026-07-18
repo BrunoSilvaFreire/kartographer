@@ -1,9 +1,11 @@
 package io.kartographer.integration
 
+import io.cucumber.java.After
 import io.cucumber.java.en.Given
 import io.cucumber.java.en.When
 import io.cucumber.java.en.Then
 import io.kartographer.core.model.TaskId
+import io.kartographer.core.plugins.PluginLoader
 import io.kartographer.dsl.TaskRegistry
 import io.kartographer.cli.KtsPipelineLoader
 import io.kartographer.core.Property
@@ -16,6 +18,30 @@ import kotlin.test.assertNotNull
 class LocalPluginReloadingStepDefinitions {
     private var tempProjDir: File? = null
     private var pipelineKtsFile: File? = null
+    private var globalPluginsDir: File? = null
+
+    @After
+    fun restorePluginLoader() {
+        if (globalPluginsDir != null) {
+            PluginLoader.initialize()
+            globalPluginsDir = null
+        }
+    }
+
+    @When("the compiled local plugin jar is installed as a global plugin")
+    fun when_install_jar_as_global_plugin() {
+        val projDir = tempProjDir ?: error("Temp project directory not initialized")
+        val libsDir = File(projDir, "karto/build/libs")
+        val jar = libsDir.listFiles { _, name -> name.endsWith(".jar") }?.firstOrNull()
+            ?: error("No compiled plugin jar found in ${libsDir.absolutePath}")
+
+        val pluginsDir = Files.createTempDirectory(File("build/tmp").absoluteFile.toPath(), "global-plugins").toFile()
+        jar.copyTo(File(pluginsDir, jar.name), overwrite = true)
+        globalPluginsDir = pluginsDir
+        // Re-initialize the loader against this plugins dir, simulating a stale
+        // globally installed copy of the plugin that must not shadow local builds.
+        PluginLoader.initialize(pluginsDir)
+    }
     
     @Given("a temporary project directory")
     fun given_temp_project_dir() {

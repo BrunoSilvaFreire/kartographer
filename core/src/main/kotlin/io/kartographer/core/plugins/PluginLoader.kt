@@ -71,10 +71,13 @@ object PluginLoader {
         val currentLoader = classLoader
         val parentLoader = Thread.currentThread().contextClassLoader ?: this::class.java.classLoader
 
-        val urls = if (currentLoader != null) {
-            currentLoader.urLs + jarFile.toURI().toURL()
-        } else {
-            arrayOf(jarFile.toURI().toURL())
+        // Dynamic jars (freshly compiled local plugins) go first so they shadow
+        // any stale copy of the same plugin in the global plugins directory.
+        val existingUrls = (currentLoader?.urLs ?: emptyArray()).filter { it != jarFile.toURI().toURL() }
+        val urls = (listOf(jarFile.toURI().toURL()) + existingUrls).toTypedArray()
+
+        existingUrls.map { File(it.path).name }.filter { it == jarFile.name }.forEach {
+            logger.warn("Plugin jar '{}' also exists in the global plugins directory; the locally compiled version takes precedence.", it)
         }
 
         try {
@@ -85,6 +88,10 @@ object PluginLoader {
         val newLoader = URLClassLoader(urls, parentLoader)
         classLoader = newLoader
 
+        // Re-register everything from the new loader: modules registered before this
+        // call may hold classes from the now-shadowed (and closed) old loader.
+        loadedModules.clear()
+        taskTypeMap.clear()
         val loader = ServiceLoader.load(KartographerModule::class.java, newLoader)
         for (module in loader) {
             if (loadedModules.none { it.id == module.id }) {
@@ -119,7 +126,8 @@ object PluginLoader {
         } else {
             emptyList()
         }
-        return (dirJars + dynamicJars).distinct()
+        // Dynamic (locally compiled) jars first — same precedence as the classloader.
+        return (dynamicJars + dirJars).distinct()
     }
 
     fun findTaskClass(className: String): Class<out Task>? {
