@@ -88,7 +88,11 @@ open class ContainerPush(name: String) : DefaultTask(name) {
             if (namespace.isPresent() && clientCmd.contains("nerdctl")) {
                 args("--namespace", namespace.get())
             }
-            args("push", fullRef)
+            args("push")
+            if (clientCmd.contains("nerdctl")) {
+                args("--all-platforms")
+            }
+            args(fullRef)
         }
     }
 }
