@@ -18,7 +18,7 @@ Feature: Container Tasks
   Scenario: Build a container image with platform, version and rootful client
     Given we load container script "examples/container/karto.kts"
     When we dry-run the ContainerBuild task "container-build-full"
-    Then the executed container command should be "sudo nerdctl build -t my-app:2.0.0 -f Dockerfile --platform linux/amd64 ."
+    Then the executed container command should be "sudo nerdctl build -t my-app:2.0.0 -f Dockerfile --build-arg VERSION=2.0.0 --platform linux/amd64 ."
     And the task "container-build-full" should require elevation
     And the task "docker-build" should not require elevation
 
@@ -27,7 +27,7 @@ Feature: Container Tasks
     When we dry-run the ContainerPush task "container-push-rootful"
     Then the executed container commands should be:
       | sudo nerdctl tag my-app:1.0 my-reg.com/my-app:1.0 |
-      | sudo nerdctl push my-reg.com/my-app:1.0           |
+      | sudo nerdctl push --all-platforms my-reg.com/my-app:1.0 |
     And the task "container-push-rootful" should require elevation
     And the task "docker-push" should not require elevation
 
