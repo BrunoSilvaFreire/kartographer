@@ -6,10 +6,30 @@ import io.kartographer.core.model.Worker
 import io.kartographer.core.model.WorkerId
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Test
 import java.nio.file.Paths
 
 class ContainerTasksTest {
+
+    @Test
+    fun containerBuildAndPushAlwaysRunBecauseTheirStateIsExternal() = runBlocking {
+        val context = ExecutionContext(
+            projectDir = Paths.get("").toAbsolutePath(),
+            worker = Worker(WorkerId("test-worker")),
+        )
+        val build = ContainerBuild("build").apply {
+            imageName.set("registry.example/image")
+            containerfile.set("Dockerfile")
+        }
+        val push = ContainerPush("push").apply {
+            imageRef.set("registry.example/image:release")
+            registry.set("")
+        }
+
+        assertFalse(build.isUpToDate(context))
+        assertFalse(push.isUpToDate(context))
+    }
 
     @Test
     fun nerdctlPushPreservesEveryBuiltPlatformWithoutRetaggingTheSameReference() = runBlocking {

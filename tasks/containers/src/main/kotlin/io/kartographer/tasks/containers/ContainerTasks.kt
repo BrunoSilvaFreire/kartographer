@@ -33,6 +33,12 @@ open class ContainerBuild(name: String) : DefaultTask(name) {
     // Output property (useful for wiring into Push tasks)
     val imageRef = property<String>()
 
+    init {
+        // The image store is external to Kartographer's state directory and may
+        // be changed or removed independently. Always rebuild when requested.
+        upToDateWhen { _, _ -> false }
+    }
+
     override suspend fun execute(context: ExecutionContext): ExecutionResult {
         val clientCmd = containerClient.get().command
         val fullImageName = if (version.isPresent()) "${imageName.get()}:${version.get()}" else imageName.get()
@@ -82,6 +88,12 @@ open class ContainerPush(name: String) : DefaultTask(name) {
     val namespace = property<String>()
 
     override val requiresElevation: Boolean get() = containerClient.get().rootful
+
+    init {
+        // A registry tag is external mutable state. In particular, rerunning a
+        // release push must repair a missing or reduced multi-platform index.
+        upToDateWhen { _, _ -> false }
+    }
 
     override suspend fun execute(context: ExecutionContext): ExecutionResult {
         val clientCmd = containerClient.get().command
