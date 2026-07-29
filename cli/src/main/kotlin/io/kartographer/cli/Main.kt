@@ -66,6 +66,14 @@ class KartographerCommand : CliktCommand(name = "kartographer", invokeWithoutSub
                 throw com.github.ajalt.clikt.core.ProgramResult(1)
             }
         }
+
+        // Loading a pipeline may set its default root directory. An explicit
+        // CLI override must win and remain visible to the run subcommand,
+        // whose Clikt context does not inherit the parent's obj value.
+        if (projectDir != null) {
+            io.kartographer.dsl.ProjectConfig.projectRoot =
+                Paths.get(projectDir!!).toAbsolutePath().normalize().toString()
+        }
     }
 }
 
