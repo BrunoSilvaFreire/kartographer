@@ -133,8 +133,18 @@ class ConcurrentScheduler(private val allNodes: Map<TaskId, Node>) {
                                         return@nodeJob
                                     }
 
-                                    // Execute task
-                                    when (val result = node.execute(finalContext)) {
+                                    // Execute task. Custom task types are not required to
+                                    // catch their own exceptions, so convert an uncaught
+                                    // task failure into the same fail-fast result used by
+                                    // tasks that return ExecutionResult.Failure.
+                                    val result = try {
+                                        node.execute(finalContext)
+                                    } catch (cancelled: CancellationException) {
+                                        throw cancelled
+                                    } catch (error: Throwable) {
+                                        ExecutionResult.Failure(error, 1)
+                                    }
+                                    when (result) {
                                         is ExecutionResult.Success -> {
                                             TaskStateStore.saveState(finalContext, node)
                                             context.observer?.onEvent(ExecutionEvent.TaskCompleted(node, result))

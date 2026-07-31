@@ -122,4 +122,25 @@ class ConcurrentSchedulerTest {
         // and triggered cancellation.
         assertTrue(!bRan)
     }
+
+    @Test
+    fun testUncaughtCustomTaskExceptionFailsPipeline() = runBlocking {
+        val task = object : Task("throws") {
+            override suspend fun execute(context: ExecutionContext): ExecutionResult {
+                throw IllegalStateException("uncaught task failure")
+            }
+        }
+        val scheduler = ConcurrentScheduler(mapOf(task.id to task))
+        val context = ExecutionContext(
+            projectDir = Paths.get("").toAbsolutePath(),
+            worker = Worker(WorkerId("test-worker"))
+        )
+
+        val result = scheduler.execute(task, context, { true })
+
+        assertTrue(result is ExecutionResult.Failure)
+        val failure = result as ExecutionResult.Failure
+        assertEquals(1, failure.exitCode)
+        assertEquals("uncaught task failure", failure.error.message)
+    }
 }
