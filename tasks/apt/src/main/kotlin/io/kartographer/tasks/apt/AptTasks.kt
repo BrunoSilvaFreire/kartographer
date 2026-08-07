@@ -27,7 +27,7 @@ open class AptPackage(name: String) : DefaultTask(name) {
         set("build/apt")
     }
 
-    val outputDeb = output {
+    val outputDeb = output("deb") {
         val pkgName = if (packageName.isPresent()) packageName.get() else name
         val pkgVersion = if (version.isPresent()) version.get() else "1.0.0"
         val arch = architecture.get()

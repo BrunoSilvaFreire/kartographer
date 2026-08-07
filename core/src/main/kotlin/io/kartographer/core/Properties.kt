@@ -15,6 +15,20 @@ class Property<T>(private var provider: Provider<T>? = null) : Provider<T> {
         private set
     var completionProvider: (suspend () -> List<String>)? = null
         private set
+    var outputName: String? = null
+        private set
+    var isSecret: Boolean = false
+        private set
+
+    /**
+     * Marks this property as a task output, reported in the pipeline summary under [name].
+     * Secret outputs are listed by name with their value masked.
+     */
+    fun asOutput(name: String, secret: Boolean = false): Property<T> {
+        outputName = name
+        isSecret = secret
+        return this
+    }
 
     override fun get(): T {
         return provider?.get() ?: directValue ?: throw IllegalStateException("Property has not been initialized.")
@@ -70,7 +84,9 @@ class Property<T>(private var provider: Provider<T>? = null) : Provider<T> {
 
 class TaskOutputProvider<T>(
     override val producingTask: Task,
-    private val resolver: () -> T
+    private val resolver: () -> T,
+    val outputName: String? = null,
+    val isSecret: Boolean = false
 ) : Provider<T> {
     override fun get(): T = resolver()
 }

@@ -19,11 +19,15 @@ open class FlutterRun(name: String) : DefaultTask(name) {
 
     init {
         topology { requiresCapability("flutter") }
+        // `flutter run` launches an app; it produces no cacheable output. The
+        // default property-based up-to-date check would otherwise skip it after
+        // the first run (properties unchanged, no inputs/outputs declared).
+        upToDateWhen { _, _ -> false }
     }
 
     override suspend fun execute(context: ExecutionContext): ExecutionResult {
         val configPath = if (config.get().endsWith(".yaml")) config.get() else "config/${config.get()}.yaml"
-        
+
         return context.executeBash {
             command(flutterBin.get())
             args("run", "-d", device.get())

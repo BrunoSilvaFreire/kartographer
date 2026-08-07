@@ -31,7 +31,7 @@ open class ContainerBuild(name: String) : DefaultTask(name) {
     override val requiresElevation: Boolean get() = containerClient.get().rootful
 
     // Output property (useful for wiring into Push tasks)
-    val imageRef = property<String>()
+    val imageRef = property<String>().asOutput("image")
 
     init {
         // The image store is external to Kartographer's state directory and may
@@ -87,6 +87,9 @@ open class ContainerPush(name: String) : DefaultTask(name) {
     val containerClient = property<ContainerClient> { set(ContainerClient.DOCKER) }
     val namespace = property<String>()
 
+    // Where the image actually landed, registry prefix included.
+    val pushedRef = property<String>().asOutput("pushed")
+
     override val requiresElevation: Boolean get() = containerClient.get().rootful
 
     init {
@@ -99,6 +102,7 @@ open class ContainerPush(name: String) : DefaultTask(name) {
         val clientCmd = containerClient.get().command
         val registryStr = registry.get()
         val fullRef = if (registryStr.isEmpty()) imageRef.get() else "$registryStr/${imageRef.get()}"
+        pushedRef.set(fullRef)
 
         if (fullRef != imageRef.get()) {
             val tagResult = context.executeBash {

@@ -102,7 +102,7 @@ object TaskSerializer {
         return name in setOf(
             "id", "name", "dependencyObjects", "dependencyNames", 
             "inputs", "outputs", "topologyRequirements", 
-            "registeredProperties", "upToDateChecks", 
+            "registeredProperties", "declaredOutputs", "upToDateChecks",
             "customFilesToTrack", "customPropertiesToTrack"
         )
     }

@@ -45,6 +45,9 @@ open class GoBuild(name: String) : GoTask(name) {
     var mainFile: String? = null
     val environment = mutableMapOf<String, String>()
 
+    // Reported only when an explicit -o was configured; `go build` otherwise picks the name.
+    val binary = output<String?>("binary") { output }
+
     override suspend fun execute(context: ExecutionContext): ExecutionResult {
         return context.executeGo {
             command = "build"

@@ -4,6 +4,8 @@ import io.kartographer.core.Property
 import io.kartographer.core.Provider
 import io.kartographer.core.TaskOutputProvider
 
+const val SECRET_MASK = "***"
+
 abstract class Node(val name: String) {
     val id: TaskId = TaskId(name)
     val dependencyObjects = mutableSetOf<Node>()
@@ -37,8 +39,33 @@ abstract class Task(name: String) : Node(name) {
         return prop
     }
 
-    protected fun <T> output(resolver: () -> T): Provider<T> {
-        return TaskOutputProvider(this, resolver)
+    val declaredOutputs = mutableListOf<TaskOutputProvider<*>>()
+
+    protected fun <T> output(name: String? = null, secret: Boolean = false, resolver: () -> T): Provider<T> {
+        val provider = TaskOutputProvider(this, resolver, name, secret)
+        if (name != null) declaredOutputs.add(provider)
+        return provider
+    }
+
+    /**
+     * Snapshot of everything this task declared as an output, for the pipeline summary.
+     * Best-effort: an output whose value is unset, still unresolvable, or whose resolver
+     * throws is simply omitted, so a task that failed halfway still reports what it got to.
+     */
+    fun collectOutputs(): Map<String, String> {
+        val collected = linkedMapOf<String, String>()
+        for (prop in registeredProperties) {
+            val label = prop.outputName ?: continue
+            if (!prop.isPresent()) continue
+            val value = runCatching { prop.get() }.getOrNull() ?: continue
+            collected[label] = if (prop.isSecret) SECRET_MASK else value.toString()
+        }
+        for (provider in declaredOutputs) {
+            val label = provider.outputName ?: continue
+            val value = runCatching { provider.get() }.getOrNull() ?: continue
+            collected[label] = if (provider.isSecret) SECRET_MASK else value.toString()
+        }
+        return collected
     }
 
     val upToDateChecks = mutableListOf<io.kartographer.core.scheduler.UpToDateCheck>()

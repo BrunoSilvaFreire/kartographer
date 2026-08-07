@@ -23,10 +23,18 @@ enum class TaskStatus {
     QUEUED, RUNNING, SUCCESS, UP_TO_DATE, FAILED
 }
 
+private fun statusLabel(status: TaskStatus) = when (status) {
+    TaskStatus.SUCCESS -> "ok"
+    TaskStatus.UP_TO_DATE -> "up-to-date"
+    TaskStatus.FAILED -> "FAILED"
+    else -> status.name.lowercase()
+}
+
 data class TaskViewState(
     val name: String,
     val status: TaskStatus = TaskStatus.QUEUED,
-    val logs: ArrayDeque<String> = ArrayDeque(100)
+    val logs: ArrayDeque<String> = ArrayDeque(100),
+    val outputs: Map<String, String> = emptyMap()
 )
 
 data class PipelineViewState(
@@ -92,7 +100,9 @@ class MosaicRenderer : Renderer {
                     state = state.copy(tasks = newTasks)
                 }
                 is ExecutionEvent.TaskCompleted -> {
-                    val newTasks = viewState.tasks.toMutableMap()
+                    // Updates land on `state`, not `viewState`: the `viewState = state`
+                    // below this `when` would otherwise discard them on the next event.
+                    val newTasks = state.tasks.toMutableMap()
                     val tvs = newTasks[event.task.name] ?: TaskViewState(event.task.name)
                     val status = when (val res = event.result) {
                         is ExecutionResult.Success -> TaskStatus.SUCCESS
@@ -105,15 +115,19 @@ class MosaicRenderer : Renderer {
                             TaskStatus.FAILED
                         }
                     }
-                    newTasks[event.task.name] = tvs.copy(status = status, logs = tvs.logs)
-                    viewState = viewState.copy(
+                    newTasks[event.task.name] = tvs.copy(status = status, logs = tvs.logs, outputs = event.outputs)
+                    state = state.copy(
                         tasks = newTasks,
-                        completedCount = viewState.completedCount + 1
+                        completedCount = state.completedCount + 1
                     )
                 }
                 is ExecutionEvent.PipelineCompleted -> {
                     state = state.copy(isFinished = true, finalResult = event.result)
                     viewState = state
+                    // A short pipeline can drain this channel inside a single frame, so
+                    // returning immediately tears the UI down before the summary is ever
+                    // painted. Give Mosaic a frame to draw the final state.
+                    kotlinx.coroutines.delay(150)
                     break
                 }
                 is ExecutionEvent.PromptRequested -> {
@@ -169,6 +183,23 @@ class MosaicRenderer : Renderer {
             }
 
             if (viewState.isFinished) {
+                val completed = viewState.tasks.values.filter { it.status != TaskStatus.QUEUED && it.status != TaskStatus.RUNNING }
+                if (completed.isNotEmpty()) {
+                    Text("") // spacer
+                    Text("Summary:")
+                    val width = completed.maxOf { it.name.length }
+                    for (task in completed) {
+                        val (glyph, color) = when (task.status) {
+                            TaskStatus.SUCCESS -> "✔" to Color.Green
+                            TaskStatus.UP_TO_DATE -> "≡" to Color.Green
+                            else -> "✖" to Color.Red
+                        }
+                        Text(" $glyph ${task.name.padEnd(width)}  ${statusLabel(task.status)}", color = color)
+                        for ((key, value) in task.outputs) {
+                            Text("   ${" ".repeat(width)}  $key = $value", color = Color.BrightBlack)
+                        }
+                    }
+                }
                 Text("") // spacer
                 when (viewState.finalResult) {
                     is ExecutionResult.Success -> Text("✅ Pipeline finished successfully.", color = Color.Green)

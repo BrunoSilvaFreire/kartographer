@@ -86,7 +86,7 @@ class ConcurrentScheduler(private val allNodes: Map<TaskId, Node>) {
                                     if (!checkTopology(node)) {
                                         val err = RuntimeException("Node '${node.name}' topology requirements not satisfied.")
                                         val result = ExecutionResult.Failure(err, 1)
-                                        context.observer?.onEvent(ExecutionEvent.TaskCompleted(node, result))
+                                        context.observer?.onEvent(ExecutionEvent.TaskCompleted(node, result, outputsOf(node)))
                                         mutex.withLock {
                                             if (failedNode == null) {
                                                 failedNode = node
@@ -99,7 +99,7 @@ class ConcurrentScheduler(private val allNodes: Map<TaskId, Node>) {
 
                                     if (node !is Task) {
                                         val result = ExecutionResult.Success
-                                        context.observer?.onEvent(ExecutionEvent.TaskCompleted(node, result))
+                                        context.observer?.onEvent(ExecutionEvent.TaskCompleted(node, result, outputsOf(node)))
                                         mutex.withLock {
                                             completedNodes.add(node)
                                             for (otherNode in executionSet) {
@@ -122,7 +122,7 @@ class ConcurrentScheduler(private val allNodes: Map<TaskId, Node>) {
                                     if (node.isUpToDate(finalContext)) {
                                         // Trigger callback to inform runner it is up-to-date
                                         val result = ExecutionResult.UpToDate
-                                        context.observer?.onEvent(ExecutionEvent.TaskCompleted(node, result))
+                                        context.observer?.onEvent(ExecutionEvent.TaskCompleted(node, result, outputsOf(node)))
                                         mutex.withLock {
                                             completedNodes.add(node)
                                             for (otherNode in executionSet) {
@@ -147,7 +147,7 @@ class ConcurrentScheduler(private val allNodes: Map<TaskId, Node>) {
                                     when (result) {
                                         is ExecutionResult.Success -> {
                                             TaskStateStore.saveState(finalContext, node)
-                                            context.observer?.onEvent(ExecutionEvent.TaskCompleted(node, result))
+                                            context.observer?.onEvent(ExecutionEvent.TaskCompleted(node, result, outputsOf(node)))
                                             mutex.withLock {
                                                 completedNodes.add(node)
                                                 for (otherNode in executionSet) {
@@ -157,7 +157,7 @@ class ConcurrentScheduler(private val allNodes: Map<TaskId, Node>) {
                                             checkAndSpawnReady()
                                         }
                                         is ExecutionResult.UpToDate -> {
-                                            context.observer?.onEvent(ExecutionEvent.TaskCompleted(node, result))
+                                            context.observer?.onEvent(ExecutionEvent.TaskCompleted(node, result, outputsOf(node)))
                                             mutex.withLock {
                                                 completedNodes.add(node)
                                                 for (otherNode in executionSet) {
@@ -167,7 +167,7 @@ class ConcurrentScheduler(private val allNodes: Map<TaskId, Node>) {
                                             checkAndSpawnReady()
                                         }
                                         is ExecutionResult.Failure -> {
-                                            context.observer?.onEvent(ExecutionEvent.TaskCompleted(node, result))
+                                            context.observer?.onEvent(ExecutionEvent.TaskCompleted(node, result, outputsOf(node)))
                                             mutex.withLock {
                                                 if (failedNode == null) {
                                                     failedNode = node
@@ -201,6 +201,12 @@ class ConcurrentScheduler(private val allNodes: Map<TaskId, Node>) {
         context.observer?.onEvent(ExecutionEvent.PipelineCompleted(finalResult))
         finalResult
     }
+
+    // ponytail: read straight off the node after execute() — Property.set() mutates in
+    // place, so values computed during execution are still there. Cancelled tasks never
+    // reach a TaskCompleted event at all, so they report nothing.
+    private fun outputsOf(node: Node): Map<String, String> =
+        (node as? Task)?.collectOutputs() ?: emptyMap()
 
     private fun cancelAllJobs(jobs: Collection<Job>) {
         for (job in jobs) {
