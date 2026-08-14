@@ -18,11 +18,12 @@ dependencies {
     // Logging framework (SLF4J facade + Logback implementation)
     api("org.slf4j:slf4j-api:2.0.12")
     
-    // Kotlin scripting compiler and JVM execution host
-    implementation("org.jetbrains.kotlin:kotlin-scripting-common:1.9.20")
-    implementation("org.jetbrains.kotlin:kotlin-scripting-jvm:1.9.20")
-    implementation("org.jetbrains.kotlin:kotlin-scripting-jvm-host:1.9.20")
-    implementation("org.jetbrains.kotlin:kotlin-scripting-compiler-embeddable:1.9.20")
+    // Only what the @KotlinScript definition in dsl/scripting needs. The compiler and the
+    // scripting *host* live in :daemon: an `implementation` dependency here would still land
+    // on every consumer's runtime classpath, and kotlin-compiler-embeddable alone is 58 MB —
+    // which is most of why the CLI used to take a second to start.
+    implementation("org.jetbrains.kotlin:kotlin-scripting-common:1.9.22")
+    implementation("org.jetbrains.kotlin:kotlin-scripting-jvm:1.9.22")
 
 
     // Kotlin reflection for plugin serialization/deserialization

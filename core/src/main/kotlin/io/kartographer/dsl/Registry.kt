@@ -6,14 +6,24 @@ import io.kartographer.core.model.Task
 import io.kartographer.core.model.TaskId
 import java.util.concurrent.ConcurrentHashMap
 
-object TaskRegistry {
+/**
+ * The nodes declared by one pipeline, plus the project settings that pipeline configured.
+ *
+ * A single JVM can hold several of these at once — the daemon keeps one per cached project —
+ * so nothing here may be process-global. [TaskRegistry] picks the instance the DSL writes to.
+ */
+class NodeRegistry {
     private val nodesMap = ConcurrentHashMap<TaskId, Node>()
+
+    /** Set by the `project { rootDirectory = ... }` DSL block. */
+    var projectRoot: String? = null
 
     val nodes: Map<TaskId, Node>
         get() = nodesMap
 
     fun clear() {
         nodesMap.clear()
+        projectRoot = null
     }
 
     fun register(node: Node) {
@@ -38,8 +48,7 @@ object TaskRegistry {
         return newGroup
     }
 
-    inline fun <reified T : Task> create(name: String, configure: T.() -> Unit): T {
-        val clazz = T::class.java
+    fun <T : Task> create(clazz: Class<T>, name: String, configure: T.() -> Unit): T {
         val task = try {
             val constructor = clazz.getConstructor(String::class.java)
             constructor.newInstance(name)
@@ -55,6 +64,51 @@ object TaskRegistry {
     }
 }
 
+/**
+ * Where the pipeline DSL writes.
+ *
+ * Kept as an `object` so `task("x") { }` in a `.kts` script needs no receiver, but the
+ * backing store is whichever [NodeRegistry] is bound to the current thread. A pipeline load
+ * wraps script evaluation in [withRegistry]; anything outside a load falls back to a shared
+ * default, which is what the CLI and the unit tests have always used.
+ *
+ * A thread local is sufficient because a script is compiled and evaluated on one thread —
+ * `BasicJvmScriptingHost.eval` runs the script body on its caller. A pipeline that registered
+ * tasks from a coroutine it dispatched elsewhere would escape the binding; nothing does that
+ * today, and [NodeRegistry] is directly addressable for any caller that needs to be explicit.
+ */
+object TaskRegistry {
+    private val default = NodeRegistry()
+    private val scoped = ThreadLocal<NodeRegistry?>()
+
+    /** Public because the inline `create` below has to reach it from its call sites. */
+    val current: NodeRegistry
+        get() = scoped.get() ?: default
+
+    /** Binds [registry] as the DSL target for the duration of [block] on this thread. */
+    fun <R> withRegistry(registry: NodeRegistry, block: () -> R): R {
+        val previous = scoped.get()
+        scoped.set(registry)
+        return try {
+            block()
+        } finally {
+            scoped.set(previous)
+        }
+    }
+
+    val nodes: Map<TaskId, Node>
+        get() = current.nodes
+
+    fun clear() = current.clear()
+
+    fun register(node: Node) = current.register(node)
+
+    fun getOrRegisterGroup(name: String): Group = current.getOrRegisterGroup(name)
+
+    inline fun <reified T : Task> create(name: String, noinline configure: T.() -> Unit): T =
+        current.create(T::class.java, name, configure)
+}
+
 inline fun <reified T : Task> task(name: String, noinline configure: T.() -> Unit): T {
     return TaskRegistry.create(name, configure)
 }
@@ -67,7 +121,11 @@ fun group(name: String, block: GroupSpec.() -> Unit): GroupSpec {
 }
 
 object ProjectConfig {
-    var projectRoot: String? = null
+    var projectRoot: String?
+        get() = TaskRegistry.current.projectRoot
+        set(value) {
+            TaskRegistry.current.projectRoot = value
+        }
 }
 
 class ProjectSpec {

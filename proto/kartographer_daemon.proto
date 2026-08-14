@@ -9,8 +9,27 @@ service KartographerDaemon {
   // Query daemon info and capabilities
   rpc GetWorkerInfo (WorkerInfoRequest) returns (WorkerInfoResponse);
 
-  // Execute a task and return the final execution result and log location
+  // Execute a single already-resolved task. This is the remote-worker path: the caller has
+  // its own copy of the pipeline and places one task on this host.
   rpc ExecuteTask (ExecuteTaskRequest) returns (ExecuteTaskResponse);
+
+  // Liveness and version handshake. The CLI restarts a daemon whose version does not match
+  // its own, so a rebuilt CLI never talks to a daemon holding old task code.
+  rpc GetDaemonInfo (DaemonInfoRequest) returns (DaemonInfoResponse);
+
+  // The loaded pipeline's node metadata. Backs `karto tasks`, `karto graph` and
+  // `karto run <task> --help` from one cached load.
+  rpc DescribeProject (DescribeProjectRequest) returns (DescribeProjectResponse);
+
+  // Shell tab completion, answered from the cached pipeline.
+  rpc Complete (CompleteRequest) returns (CompleteResponse);
+
+  // Run a task and its dependencies here. Bidirectional so execution events stream out while
+  // answers to interactive prompts stream back.
+  rpc RunPipeline (stream RunClientMessage) returns (stream RunServerMessage);
+
+  // Ask the daemon to exit once in-flight runs finish.
+  rpc Shutdown (ShutdownRequest) returns (ShutdownResponse);
 }
 
 message WorkerInfoRequest {}
@@ -25,16 +44,16 @@ message ExecuteTaskRequest {
   string task_type = 1;       // e.g. "io.kartographer.tasks.go.GoBuild"
   string task_name = 2;       // e.g. "build tileserver"
   string run_id = 3;          // Unique identifier for the pipeline run (used to group logs)
-  
+
   // Serialized task properties
   map<string, string> properties = 4;
-  
+
   // Inputs & Outputs
   repeated string input_files = 5;
   repeated string input_dirs = 6;
   repeated string output_files = 7;
   repeated string output_dirs = 8;
-  
+
   string project_dir = 9;
   map<string, string> environment = 10;
   bool dry_run = 11;
@@ -50,4 +69,227 @@ message ExecuteTaskResponse {
   string error_message = 2;
   int32 exit_code = 3;
   string log_path = 4;        // Path to the log file on the daemon host
+}
+
+// ---------------------------------------------------------------------------
+// Project-scoped requests
+// ---------------------------------------------------------------------------
+
+// Everything the daemon needs to identify and load the caller's pipeline.
+message ProjectContext {
+  string project_dir = 1;             // Absolute, resolved by the client
+  string pipeline = 2;                // Optional -p/--pipeline override; .kts path or class name
+
+  // The client's environment, not the daemon's. A daemon inherits the environment of
+  // whatever started it, which is rarely the shell the user is typing in.
+  map<string, string> environment = 3;
+
+  // Whether the user actually passed -d/--project-dir. When false, a `project { rootDirectory }`
+  // declared by the pipeline is allowed to redirect execution, matching local CLI behaviour.
+  bool project_dir_explicit = 4;
+}
+
+enum RunStatus {
+  RUN_SUCCESS = 0;
+  RUN_FAILURE = 1;
+  RUN_UP_TO_DATE = 2;
+}
+
+message PropertyInfo {
+  string name = 1;                       // Declaring field name
+  string cli_name = 2;                   // --<cli_name>, empty when the property has no flag
+  string description = 3;
+  string type_name = 4;                  // Simple name of the property's value type
+  repeated string literal_completions = 5;
+  bool has_dynamic_completions = 6;      // Values require a Complete call to enumerate
+}
+
+message NodeInfo {
+  string name = 1;                       // Fully qualified node name
+  string type = 2;                       // Node class simple name
+  repeated string dependencies = 3;      // As declared, before resolution
+  repeated PropertyInfo properties = 4;
+  bool is_task = 5;
+  bool requires_elevation = 6;
+}
+
+// A node with its dependencies resolved through the DAG, for `karto graph`.
+message ResolvedNode {
+  string name = 1;
+  repeated string dependencies = 2;
+}
+
+message DescribeProjectRequest {
+  ProjectContext context = 1;
+}
+
+message DescribeProjectResponse {
+  repeated NodeInfo nodes = 1;
+  repeated ResolvedNode graph = 2;
+  // Set when dependency resolution failed (cycle or missing dependency). `tasks` still
+  // renders in that case; `graph` reports the error, as it does today.
+  string graph_error = 3;
+  string project_root = 4;
+}
+
+message CompleteRequest {
+  ProjectContext context = 1;
+  repeated string words = 2;             // COMP_WORDS
+  int32 cword = 3;                       // COMP_CWORD
+}
+
+message CompleteResponse {
+  repeated string candidates = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Pipeline execution
+// ---------------------------------------------------------------------------
+
+message RunStart {
+  ProjectContext context = 1;
+  string task_name = 2;
+  map<string, string> properties = 3;    // Raw -P values; the daemon coerces to declared types
+  bool dry_run = 4;
+}
+
+message PromptResponse {
+  string request_id = 1;
+  string value = 2;
+}
+
+message RunCancel {}
+
+message RunClientMessage {
+  oneof message {
+    RunStart start = 1;
+    PromptResponse prompt_response = 2;
+    RunCancel cancel = 3;
+  }
+}
+
+message PipelineStarted {
+  int32 total_tasks = 1;
+  repeated ResolvedNode graph = 2;
+}
+
+message TaskQueued { string task = 1; }
+
+message TaskStarted { string task = 1; }
+
+message TaskOutput {
+  string task = 1;
+  string line = 2;
+  bool is_error = 3;
+}
+
+message TaskCompleted {
+  string task = 1;
+  RunStatus status = 2;
+  string error_message = 3;
+  int32 exit_code = 4;
+  map<string, string> outputs = 5;       // Task.collectOutputs(), secrets already masked
+}
+
+enum PromptKind {
+  PROMPT_GENERIC = 0;
+  // The pre-run sudo prompt. Carries `elevated_tasks` so the CLI can print the same banner
+  // it prints today before asking for a password.
+  PROMPT_SUDO_PASSWORD = 1;
+}
+
+message PromptRequested {
+  string request_id = 1;
+  string task = 2;                       // Empty for pipeline-level prompts
+  string message = 3;
+  bool secret = 4;
+  PromptKind kind = 5;
+  repeated string elevated_tasks = 6;
+}
+
+message PipelineCompleted {
+  RunStatus status = 1;
+  string error_message = 2;
+  int32 exit_code = 3;
+}
+
+// The run could not start at all — pipeline failed to load, unknown task, bad property.
+message RunError {
+  string message = 1;
+  int32 exit_code = 2;
+}
+
+message RunServerMessage {
+  oneof message {
+    PipelineStarted pipeline_started = 1;
+    TaskQueued task_queued = 2;
+    TaskStarted task_started = 3;
+    TaskOutput task_output = 4;
+    TaskCompleted task_completed = 5;
+    PromptRequested prompt_requested = 6;
+    PipelineCompleted pipeline_completed = 7;
+    RunError error = 8;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Lifecycle
+// ---------------------------------------------------------------------------
+
+message DaemonInfoRequest {}
+
+message DaemonInfoResponse {
+  string version = 1;                    // Build version; mismatch triggers a CLI-side restart
+  int64 pid = 2;
+  int32 active_runs = 3;
+  int32 cached_projects = 4;
+  int64 uptime_millis = 5;
+}
+
+message ShutdownRequest {}
+
+message ShutdownResponse {
+  bool accepted = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Local protocol
+// ---------------------------------------------------------------------------
+//
+// The CLI does not speak gRPC. Bringing up a gRPC/Netty channel costs ~630 ms in a
+// freshly started JVM — Netty's epoll native load alone is ~276 ms — which dwarfs the
+// ~23 ms the daemon needs to answer from cache and defeats the point of having a daemon.
+//
+// So locally these same messages travel as length-prefixed frames over a plain JDK Unix
+// socket: a 4-byte big-endian length followed by a serialized envelope. That path costs
+// ~60 ms. gRPC is still how genuinely remote workers are reached over TCP.
+//
+// One connection is one conversation. Unary calls are request-then-response; a run sends
+// RunClientMessage frames and receives RunServerMessage frames until the pipeline
+// completes or errors.
+
+message LocalRequest {
+  oneof request {
+    DaemonInfoRequest daemon_info = 1;
+    DescribeProjectRequest describe_project = 2;
+    CompleteRequest complete = 3;
+    RunClientMessage run = 4;
+    ShutdownRequest shutdown = 5;
+  }
+}
+
+message LocalError {
+  string message = 1;
+  int32 code = 2;
+}
+
+message LocalResponse {
+  oneof response {
+    DaemonInfoResponse daemon_info = 1;
+    DescribeProjectResponse describe_project = 2;
+    CompleteResponse complete = 3;
+    RunServerMessage run = 4;
+    ShutdownResponse shutdown = 5;
+    LocalError error = 6;
+  }
 }

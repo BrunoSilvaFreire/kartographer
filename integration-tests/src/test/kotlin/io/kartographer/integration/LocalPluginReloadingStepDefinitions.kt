@@ -4,12 +4,13 @@ import io.cucumber.java.After
 import io.cucumber.java.en.Given
 import io.cucumber.java.en.When
 import io.cucumber.java.en.Then
+import io.kartographer.core.model.Node
 import io.kartographer.core.model.TaskId
 import io.kartographer.core.plugins.PluginLoader
-import io.kartographer.dsl.TaskRegistry
-import io.kartographer.cli.KtsPipelineLoader
+import io.kartographer.daemon.project.ProjectCache
 import io.kartographer.core.Property
 import io.kartographer.core.model.Task
+import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.nio.file.Files
 import kotlin.test.assertEquals
@@ -19,6 +20,12 @@ class LocalPluginReloadingStepDefinitions {
     private var tempProjDir: File? = null
     private var pipelineKtsFile: File? = null
     private var globalPluginsDir: File? = null
+
+    // Loading goes through the cache rather than the loader directly, so these scenarios
+    // double as the regression test for daemon cache invalidation: a plugin source edit has
+    // to change the project fingerprint or the reload steps below silently see stale values.
+    private val cache = ProjectCache()
+    private var loadedNodes: Map<TaskId, Node> = emptyMap()
 
     @After
     fun restorePluginLoader() {
@@ -129,15 +136,14 @@ class LocalPluginReloadingStepDefinitions {
         val scriptFile = File(projDir, scriptName)
         scriptFile.writeText(scriptContent)
         pipelineKtsFile = scriptFile
-        
-        val loader = KtsPipelineLoader()
-        loader.load(scriptFile.absolutePath)
+
+        loadPipeline(scriptFile)
     }
 
     @Then("the task {string} should have property {string} with value {int}")
     fun then_task_has_property_value(taskName: String, propName: String, expectedValue: Int) {
-        val node = TaskRegistry.nodes[TaskId(taskName)]
-        assertNotNull(node, "Task '$taskName' was not registered in TaskRegistry")
+        val node = loadedNodes[TaskId(taskName)]
+        assertNotNull(node, "Task '$taskName' was not registered by the pipeline")
         val task = node as? Task ?: error("Node '$taskName' is not a Task")
         
         val propField = task::class.java.getDeclaredField(propName)
@@ -154,9 +160,13 @@ class LocalPluginReloadingStepDefinitions {
     @When("we load and execute the pipeline script {string} again")
     fun when_load_and_execute_again(scriptName: String) {
         val projDir = tempProjDir ?: error("Temp project directory not initialized")
-        val scriptFile = File(projDir, scriptName)
-        
-        val loader = KtsPipelineLoader()
-        loader.load(scriptFile.absolutePath)
+        loadPipeline(File(projDir, scriptName))
+    }
+
+    private fun loadPipeline(scriptFile: File) {
+        val projDir = tempProjDir ?: error("Temp project directory not initialized")
+        loadedNodes = runBlocking {
+            cache.use(projDir, scriptFile.absolutePath) { it.nodes.toMap() }
+        }
     }
 }

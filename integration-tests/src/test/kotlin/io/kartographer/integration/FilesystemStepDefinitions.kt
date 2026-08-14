@@ -4,7 +4,7 @@ import io.cucumber.java.en.Given
 import io.cucumber.java.en.When
 import io.cucumber.java.en.Then
 import io.kartographer.core.model.*
-import io.kartographer.cli.KtsPipelineLoader
+import io.kartographer.daemon.project.KtsPipelineLoader
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Files
 import java.nio.file.Path

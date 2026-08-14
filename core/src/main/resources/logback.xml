@@ -5,6 +5,12 @@
         </encoder>
     </appender>
 
+    <!--
+      Unix-domain channels do not support SO_KEEPALIVE, which gRPC sets unconditionally.
+      Netty warns once per connection; on the CLI that lands in the middle of command output.
+    -->
+    <logger name="io.grpc.netty.shaded.io.netty.bootstrap.Bootstrap" level="ERROR" />
+
     <root level="INFO">
         <appender-ref ref="STDOUT" />
     </root>

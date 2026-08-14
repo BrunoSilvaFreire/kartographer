@@ -6,7 +6,7 @@ import io.cucumber.java.en.Then
 import io.kartographer.core.model.*
 import io.kartographer.core.scheduler.ConcurrentScheduler
 import io.kartographer.tasks.DefaultTask
-import io.kartographer.cli.KtsPipelineLoader
+import io.kartographer.daemon.project.KtsPipelineLoader
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Files
 import kotlin.test.assertEquals

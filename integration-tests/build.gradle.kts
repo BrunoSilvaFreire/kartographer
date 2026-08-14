@@ -11,6 +11,8 @@ repositories {
 dependencies {
     implementation(project(":core"))
     implementation(project(":cli"))
+    // Pipeline loading and the project cache live in the daemon now.
+    implementation(project(":daemon"))
     implementation(project(":tasks:go"))
     implementation(project(":tasks:proto"))
     implementation(project(":tasks:gradle"))

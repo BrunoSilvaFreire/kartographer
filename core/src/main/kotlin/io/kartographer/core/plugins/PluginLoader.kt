@@ -2,56 +2,93 @@ package io.kartographer.core.plugins
 
 import io.kartographer.core.model.Task
 import org.slf4j.LoggerFactory
+import java.io.Closeable
 import java.io.File
 import java.net.URLClassLoader
 import java.util.ServiceLoader
 
-object PluginLoader {
-    private val logger = LoggerFactory.getLogger(PluginLoader::class.java)
+/**
+ * One plugin classpath: the jars in [pluginsDir] plus any jar handed to [addPluginJar],
+ * loaded through a [URLClassLoader] of its own.
+ *
+ * A long-lived daemon serves several projects at once, and a locally compiled `karto/` jar
+ * must only be visible to the project that built it — so this is a class, not a singleton.
+ * Project sets are created with the global set's loader as [parentClassLoader], which makes
+ * globally installed plugins visible to every project while keeping local jars private.
+ */
+class PluginSet(
+    private val pluginsDir: File?,
+    private val parentClassLoader: ClassLoader
+) : Closeable {
+    companion object {
+        private val logger = LoggerFactory.getLogger(PluginSet::class.java)
+    }
 
     private var classLoader: URLClassLoader? = null
     private val loadedModules = mutableListOf<KartographerModule>()
     private val taskTypeMap = mutableMapOf<String, Class<out Task>>()
-    private var activePluginsDir: File? = null
     private val dynamicJars = mutableListOf<File>()
 
     init {
-        initialize()
+        reload()
     }
 
+    /** Rebuilds the classloader from [pluginsDir] alone, discarding any dynamic jars. */
     @Synchronized
-    fun initialize(pluginsDir: File? = null) {
-        loadedModules.clear()
-        taskTypeMap.clear()
+    fun reload() {
+        val jarFiles = directoryJars()
+        rebuild(jarFiles.map { it.toURI().toURL() })
         dynamicJars.clear()
+    }
 
+    /**
+     * Adds a freshly compiled jar to the front of the classpath so it shadows any stale copy
+     * of the same plugin sitting in the plugins directory.
+     */
+    @Synchronized
+    fun addPluginJar(jarFile: File) {
+        if (!dynamicJars.contains(jarFile)) {
+            dynamicJars.add(jarFile)
+        }
+
+        val jarUrl = jarFile.toURI().toURL()
+        val existingUrls = (classLoader?.urLs ?: emptyArray()).filter { it != jarUrl }
+
+        existingUrls.map { File(it.path).name }.filter { it == jarFile.name }.forEach {
+            logger.warn(
+                "Plugin jar '{}' also exists in the global plugins directory; the locally compiled version takes precedence.",
+                it
+            )
+        }
+
+        rebuild(listOf(jarUrl) + existingUrls)
+    }
+
+    /**
+     * Swaps in a new classloader and re-runs discovery against it. Modules registered before
+     * this point may hold classes from the loader we are about to close, so everything is
+     * re-registered rather than merged.
+     */
+    private fun rebuild(urls: List<java.net.URL>) {
         try {
             classLoader?.close()
         } catch (e: Exception) {
             logger.warn("Failed to close old classLoader: {}", e.localizedMessage)
         }
-        classLoader = null
 
-        val dir = pluginsDir ?: getPluginsDirectory()
-        activePluginsDir = dir
-        val jarFiles = if (dir.exists() && dir.isDirectory) {
-            dir.listFiles { _, name -> name.endsWith(".jar") } ?: emptyArray()
-        } else {
-            emptyArray()
-        }
+        classLoader = if (urls.isEmpty()) null else URLClassLoader(urls.toTypedArray(), parentClassLoader)
 
-        if (jarFiles.isNotEmpty()) {
-            val urls = jarFiles.map { it.toURI().toURL() }.toTypedArray()
-            val parentLoader = Thread.currentThread().contextClassLoader ?: this::class.java.classLoader
-            classLoader = URLClassLoader(urls, parentLoader)
-        }
+        loadedModules.clear()
+        taskTypeMap.clear()
 
-        val activeLoader = classLoader ?: Thread.currentThread().contextClassLoader ?: this::class.java.classLoader
-
+        val activeLoader = classLoader ?: parentClassLoader
         try {
-            val loader = ServiceLoader.load(KartographerModule::class.java, activeLoader)
-            for (module in loader) {
-                loadedModules.add(module)
+            // ServiceLoader walks the whole delegation chain, so a project set also picks up
+            // the modules its parent (the global set) provides.
+            for (module in ServiceLoader.load(KartographerModule::class.java, activeLoader)) {
+                if (loadedModules.none { it.id == module.id }) {
+                    loadedModules.add(module)
+                }
                 for (type in module.taskTypes) {
                     taskTypeMap[type.name] = type
                     taskTypeMap[type.simpleName] = type
@@ -62,47 +99,83 @@ object PluginLoader {
         }
     }
 
+    private fun directoryJars(): List<File> {
+        val dir = pluginsDir ?: return emptyList()
+        if (!dir.exists() || !dir.isDirectory) return emptyList()
+        return dir.listFiles { _, name -> name.endsWith(".jar") }?.toList() ?: emptyList()
+    }
+
+    fun getClassLoader(): ClassLoader = classLoader ?: parentClassLoader
+
+    fun getLoadedModules(): List<KartographerModule> = loadedModules.toList()
+
+    /** Dynamic (locally compiled) jars first — same precedence as the classloader. */
     @Synchronized
-    fun addPluginJar(jarFile: File) {
-        if (!dynamicJars.contains(jarFile)) {
-            dynamicJars.add(jarFile)
+    fun getPluginJars(): List<File> = (dynamicJars + directoryJars()).distinct()
+
+    fun findTaskClass(className: String): Class<out Task>? {
+        taskTypeMap[className]?.let { return it }
+
+        return try {
+            @Suppress("UNCHECKED_CAST")
+            Class.forName(className, true, getClassLoader()) as Class<out Task>
+        } catch (e: ClassNotFoundException) {
+            null
         }
+    }
 
-        val currentLoader = classLoader
-        val parentLoader = Thread.currentThread().contextClassLoader ?: this::class.java.classLoader
-
-        // Dynamic jars (freshly compiled local plugins) go first so they shadow
-        // any stale copy of the same plugin in the global plugins directory.
-        val existingUrls = (currentLoader?.urLs ?: emptyArray()).filter { it != jarFile.toURI().toURL() }
-        val urls = (listOf(jarFile.toURI().toURL()) + existingUrls).toTypedArray()
-
-        existingUrls.map { File(it.path).name }.filter { it == jarFile.name }.forEach {
-            logger.warn("Plugin jar '{}' also exists in the global plugins directory; the locally compiled version takes precedence.", it)
-        }
-
+    /**
+     * Releases this set's classloader. Only call once no task instance loaded through it is
+     * still in use — closing a loader breaks classes that have not been fully resolved yet.
+     */
+    @Synchronized
+    override fun close() {
         try {
             classLoader?.close()
         } catch (e: Exception) {
-            logger.warn("Failed to close old classLoader during addPluginJar: {}", e.localizedMessage)
+            logger.warn("Failed to close classLoader: {}", e.localizedMessage)
         }
-        val newLoader = URLClassLoader(urls, parentLoader)
-        classLoader = newLoader
-
-        // Re-register everything from the new loader: modules registered before this
-        // call may hold classes from the now-shadowed (and closed) old loader.
+        classLoader = null
         loadedModules.clear()
         taskTypeMap.clear()
-        val loader = ServiceLoader.load(KartographerModule::class.java, newLoader)
-        for (module in loader) {
-            if (loadedModules.none { it.id == module.id }) {
-                loadedModules.add(module)
-                for (type in module.taskTypes) {
-                    taskTypeMap[type.name] = type
-                    taskTypeMap[type.simpleName] = type
-                }
-            }
-        }
+        dynamicJars.clear()
     }
+}
+
+/**
+ * The process-wide plugin set, backed by `$KARTOGRAPHER_PLUGINS_DIR` (default
+ * `~/.kartographer/plugins`), plus the stateless helpers for finding and building a
+ * project's local `karto/` plugin.
+ */
+object PluginLoader {
+    private var globalSet: PluginSet = PluginSet(getPluginsDirectory(), defaultParentClassLoader())
+
+    /** Rebuilds the global set, optionally pointing it at a different plugins directory. */
+    @Synchronized
+    fun initialize(pluginsDir: File? = null) {
+        globalSet.close()
+        globalSet = PluginSet(pluginsDir ?: getPluginsDirectory(), defaultParentClassLoader())
+    }
+
+    /**
+     * A plugin set private to one project, layered over the global one so global plugins stay
+     * visible. It scans no directory of its own — local jars arrive via [PluginSet.addPluginJar].
+     */
+    fun createProjectSet(): PluginSet = PluginSet(null, globalSet.getClassLoader())
+
+    @Synchronized
+    fun addPluginJar(jarFile: File) = globalSet.addPluginJar(jarFile)
+
+    fun getClassLoader(): ClassLoader = globalSet.getClassLoader()
+
+    fun getLoadedModules(): List<KartographerModule> = globalSet.getLoadedModules()
+
+    fun getPluginJars(): List<File> = globalSet.getPluginJars()
+
+    fun findTaskClass(className: String): Class<out Task>? = globalSet.findTaskClass(className)
+
+    private fun defaultParentClassLoader(): ClassLoader =
+        Thread.currentThread().contextClassLoader ?: this::class.java.classLoader
 
     private fun getPluginsDirectory(): File {
         val envPath = System.getenv("KARTOGRAPHER_PLUGINS_DIR")
@@ -111,35 +184,6 @@ object PluginLoader {
         }
         val userHome = System.getProperty("user.home") ?: "."
         return File(userHome, ".kartographer/plugins")
-    }
-
-    fun getClassLoader(): ClassLoader {
-        return classLoader ?: Thread.currentThread().contextClassLoader ?: this::class.java.classLoader
-    }
-
-    fun getLoadedModules(): List<KartographerModule> = loadedModules
-
-    fun getPluginJars(): List<File> {
-        val dir = activePluginsDir ?: getPluginsDirectory()
-        val dirJars = if (dir.exists() && dir.isDirectory) {
-            dir.listFiles { _, name -> name.endsWith(".jar") }?.toList() ?: emptyList()
-        } else {
-            emptyList()
-        }
-        // Dynamic (locally compiled) jars first — same precedence as the classloader.
-        return (dynamicJars + dirJars).distinct()
-    }
-
-    fun findTaskClass(className: String): Class<out Task>? {
-        taskTypeMap[className]?.let { return it }
-
-        return try {
-            val loader = getClassLoader()
-            @Suppress("UNCHECKED_CAST")
-            Class.forName(className, true, loader) as Class<out Task>
-        } catch (e: ClassNotFoundException) {
-            null
-        }
     }
 
     fun findGradlew(startDir: File): File? {

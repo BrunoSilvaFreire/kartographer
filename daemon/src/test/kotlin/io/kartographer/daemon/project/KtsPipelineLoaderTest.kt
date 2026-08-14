@@ -1,23 +1,19 @@
-package io.kartographer.cli
+package io.kartographer.daemon.project
 
-import io.kartographer.cli.KtsPipelineLoader
-import io.kartographer.tasks.DefaultTask
+import io.kartographer.core.model.TaskId
+import io.kartographer.core.plugins.PluginLoader
+import io.kartographer.dsl.NodeRegistry
 import io.kartographer.dsl.TaskRegistry
+import io.kartographer.tasks.DefaultTask
 import org.junit.jupiter.api.Assertions.*
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import kotlin.io.path.deleteIfExists
 
 class KtsPipelineLoaderTest {
 
-    @BeforeEach
-    fun setup() {
-        TaskRegistry.clear()
-    }
-
     @Test
-    fun testLoadSimpleKtsScript() {
+    fun `loads a script into the supplied registry`() {
         val scriptContent = """
             task<DefaultTask>("compile") {
                 inputs.dir("src")
@@ -33,10 +29,11 @@ class KtsPipelineLoaderTest {
         val tempScript = Files.createTempFile("test_pipeline", ".kartographer.kts")
         try {
             tempScript.toFile().writeText(scriptContent)
-            
-            val loader = KtsPipelineLoader()
+
+            val registry = NodeRegistry()
+            val pluginSet = PluginLoader.createProjectSet()
             val tasks = try {
-                loader.load(tempScript.toAbsolutePath().toString())
+                KtsPipelineLoader().load(tempScript.toAbsolutePath().toString(), registry, pluginSet)
             } catch (e: Exception) {
                 println("COMPILATION ERROR DETAILS:")
                 println(e.message)
@@ -44,11 +41,14 @@ class KtsPipelineLoaderTest {
             }
 
             assertEquals(1, tasks.size)
-            val node = tasks.values.first()
-            assertTrue(node is DefaultTask)
-            val task = node as DefaultTask
+            val task = tasks.values.first()
+            assertTrue(task is DefaultTask)
             assertEquals("compile", task.name)
-            assertEquals("src", task.inputs.dirs.first())
+            assertEquals("src", (task as DefaultTask).inputs.dirs.first())
+
+            // The whole point of the registry argument: the process-wide default is untouched,
+            // so a second project loading in this JVM starts from a clean slate.
+            assertFalse(TaskRegistry.nodes.containsKey(TaskId("compile")))
         } finally {
             tempScript.deleteIfExists()
         }

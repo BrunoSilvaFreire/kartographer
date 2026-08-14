@@ -2,6 +2,7 @@ package io.kartographer.local
 
 import io.kartographer.core.model.ExecutionContext
 import io.kartographer.core.model.ExecutionEnvironment
+import io.kartographer.core.model.ExecutionEvent
 import io.kartographer.core.model.ExecutionObserver
 import io.kartographer.core.model.Task
 import io.kartographer.core.model.UserPrompter
@@ -35,16 +36,33 @@ class HostExecutionEnvironment(val context: ExecutionContext) : ExecutionEnviron
     ): Int {
         val executor = LocalProcessExecutor()
 
-        context.redirectOutput?.let {
-            executor.redirectOutput = it
-            executor.stdoutConsumer = {}
-        }
-        context.redirectError?.let {
-            executor.redirectError = it
-            executor.stderrConsumer = {}
+        val observer = context.observer
+        val task = context.task
+        if (observer != null && task != null) {
+            // Forward each line as it arrives. A ProcessBuilder redirect hands the file
+            // descriptor straight to the child, so the JVM never sees the bytes and nothing
+            // can be streamed — the pipe has to stay open. Callers that also want a log file
+            // tee from the observer.
             executor.redirectErrorStream = false
+            executor.stdoutConsumer = { line ->
+                observer.onEvent(ExecutionEvent.TaskOutput(task, line, isError = false))
+            }
+            executor.stderrConsumer = { line ->
+                observer.onEvent(ExecutionEvent.TaskOutput(task, line, isError = true))
+            }
+        } else {
+            context.redirectOutput?.let {
+                executor.redirectOutput = it
+                executor.stdoutConsumer = {}
+            }
+            context.redirectError?.let {
+                executor.redirectError = it
+                executor.stderrConsumer = {}
+                executor.redirectErrorStream = false
+            }
         }
-        
+
+
         var finalCommand = command
         // Already root (e.g. the whole karto run is wrapped in `llm-sudo`):
         // sudo needs no password, and prompting would block non-interactive runs.
