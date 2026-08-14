@@ -186,7 +186,24 @@ object PluginLoader {
         return File(userHome, ".kartographer/plugins")
     }
 
-    fun findGradlew(startDir: File): File? {
+    /**
+     * Finds a Gradle to build a project-local plugin with. A pipeline promoted into the repo it
+     * builds no longer sits under Kartographer's own checkout, so the walk up from the script
+     * often finds no wrapper at all — a Go or Flutter repo has no reason to carry one.
+     */
+    fun findGradlew(
+        startDir: File,
+        pinnedGradle: String? = System.getenv("KARTOGRAPHER_GRADLE"),
+        path: String? = System.getenv("PATH")
+    ): File? {
+        if (!pinnedGradle.isNullOrEmpty()) {
+            val file = File(pinnedGradle)
+            if (file.canExecute()) {
+                return file
+            }
+            System.err.println("KARTOGRAPHER_GRADLE is set to $pinnedGradle but it is not executable; ignoring it")
+        }
+
         var dir: File? = startDir.absoluteFile
         while (dir != null) {
             val gradlew = File(dir, "gradlew")
@@ -195,7 +212,12 @@ object PluginLoader {
             }
             dir = dir.parentFile
         }
-        return null
+
+        // ponytail: last resort is any gradle on PATH; pin a specific one with KARTOGRAPHER_GRADLE
+        return path
+            ?.split(File.pathSeparator)
+            ?.map { File(it, "gradle") }
+            ?.firstOrNull { it.canExecute() }
     }
 
     fun compileLocalPlugin(localPluginDir: File, gradlewFile: File): Boolean {
