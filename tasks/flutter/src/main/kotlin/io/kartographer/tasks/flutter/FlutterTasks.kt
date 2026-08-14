@@ -7,8 +7,15 @@ import io.kartographer.core.model.executeBash
 
 open class FlutterRun(name: String) : DefaultTask(name) {
     val device = property<String> { set("linux") }
+        .withCLI("device", "Device to run on")
     val config = property<String> { set("dev") }
+        .withCLI("config", "Config profile, a name under config/ or a path")
+    // Exposed rather than expanded into the task tree: a run task per build mode would triple
+    // the matrix for the axis that varies least.
     val mode = property<String> { set("debug") }
+        .withCLI("mode", "Build mode") { completeWith("debug", "profile", "release") }
+    val wasm = property<String> { set("false") }
+        .withCLI("wasm", "Compile to WebAssembly (web devices only)") { completeWith("true", "false") }
     val target = property<String> { set("lib/main.dart") }
     val webPort = property<String>()
     val webHostname = property<String>()
@@ -41,8 +48,9 @@ open class FlutterRun(name: String) : DefaultTask(name) {
             if (device.get() in listOf("chrome", "web-server")) {
                 if (webPort.isPresent()) args("--web-port", webPort.get())
                 if (webHostname.isPresent()) args("--web-hostname", webHostname.get())
+                if (wasm.get().equals("true", ignoreCase = true)) args("--wasm")
             }
-            
+
             args(this@FlutterRun.args)
             environment("CITYSCAPE_CONFIG", configPath)
         }
@@ -51,7 +59,11 @@ open class FlutterRun(name: String) : DefaultTask(name) {
 
 open class FlutterBuild(name: String) : DefaultTask(name) {
     val targetPlatform = property<String>() // e.g., apk, appbundle, web, linux
+        .withCLI("target_platform", "Platform to build") {
+            completeWith("apk", "appbundle", "web", "linux", "macos", "windows", "ios")
+        }
     val config = property<String> { set("prod") }
+        .withCLI("config", "Config profile, a name under config/ or a path")
     val flutterBin = property<String> { set("flutter") }
 
     val args = mutableListOf<String>()
