@@ -1,8 +1,9 @@
 # bash completion for karto / kartographer
 #
-# Task names come from the daemon, which answers from an already-compiled pipeline for the
-# current directory (~0.2s). With no daemon running the CLI prints nothing and TAB just
-# offers nothing — it deliberately never starts one, since that would freeze the shell.
+# Everything past the subcommand comes from the daemon, which answers from an already-compiled
+# pipeline for the current directory (~0.2s): task paths, each task's property flags, and the
+# accepted values for a flag. With no daemon running the CLI prints nothing and TAB offers
+# nothing — it deliberately never starts one, since that would freeze the shell.
 
 _karto() {
     local cur="${COMP_WORDS[COMP_CWORD]}"
@@ -20,13 +21,7 @@ _karto() {
             ;;
     esac
 
-    if [[ "$cur" == -* ]]; then
-        COMPREPLY=( $(compgen -W "-p --pipeline -d --project-dir -h --help" -- "$cur") )
-        return
-    fi
-
-    # The subcommand slot is static; the daemon only knows about tasks and would answer
-    # this position with task names.
+    # The subcommand slot is static, and the daemon would answer this position with task names.
     local i sawcmd=0
     for (( i = 1; i < COMP_CWORD; i++ )); do
         case "${COMP_WORDS[i]}" in
@@ -34,16 +29,24 @@ _karto() {
         esac
     done
     if (( ! sawcmd )); then
-        COMPREPLY=( $(compgen -W "tasks graph run" -- "$cur") )
+        COMPREPLY=( $(compgen -W "tasks graph run -p --pipeline -d --project-dir -h --help" -- "$cur") )
         return
     fi
 
-    COMPREPLY=( $(compgen -W "$(
+    local candidates
+    candidates="$(
         _KARTO_COMPLETE=bash \
         COMP_WORDS="${COMP_WORDS[*]}" \
         COMP_CWORD="$COMP_CWORD" \
         "${COMP_WORDS[0]}" "${COMP_WORDS[@]:1}" 2>/dev/null
-    )" -- "$cur") )
+    )"
+
+    # --help is the CLI's own, so the daemon never reports it.
+    if [[ "$cur" == -* ]]; then
+        candidates="$candidates --help"
+    fi
+
+    COMPREPLY=( $(compgen -W "$candidates" -- "$cur") )
 }
 
 complete -F _karto karto kartographer
