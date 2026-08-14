@@ -124,22 +124,40 @@ class KtsPipelineLoader {
             return
         }
 
+        // Every failure below used to `return`, which let the script compile without the
+        // plugin on its classpath. That surfaces as a wall of "Unresolved reference" naming
+        // the pipeline's own symbols, with nothing pointing at the real cause.
         val gradlewFile = PluginLoader.findGradlew(scriptDir)
         if (gradlewFile == null) {
-            logger.warn("Could not locate gradlew wrapper to compile local plugin in {}", localPluginDir.absolutePath)
+            val prebuilt = PluginLoader.findLocalPluginJar(localPluginDir)
+                ?: throw IllegalStateException(
+                    "Found a local plugin at ${localPluginDir.absolutePath} but no Gradle to build it " +
+                        "with, and no previously built jar to fall back on. Add a Gradle wrapper to " +
+                        "this repository, put `gradle` on PATH, or point KARTOGRAPHER_GRADLE at one."
+                )
+            logger.warn(
+                "No Gradle found to rebuild the local plugin in {}; using the previously built {}. " +
+                    "Edits to the plugin's sources will NOT be picked up until a Gradle is available.",
+                localPluginDir.absolutePath,
+                prebuilt.name,
+            )
+            pluginSet.addPluginJar(prebuilt)
             return
         }
 
         logger.info("Compiling local plugin: {}", localPluginDir.absolutePath)
         if (!PluginLoader.compileLocalPlugin(localPluginDir, gradlewFile)) {
-            return
+            throw IllegalStateException(
+                "Failed to compile the local plugin in ${localPluginDir.absolutePath} using " +
+                    "${gradlewFile.absolutePath}. The Gradle output above says why."
+            )
         }
 
         val jarFile = PluginLoader.findLocalPluginJar(localPluginDir)
-        if (jarFile == null) {
-            logger.warn("Local plugin compiled successfully but jar was not found in build/libs")
-            return
-        }
+            ?: throw IllegalStateException(
+                "The local plugin in ${localPluginDir.absolutePath} compiled, but no jar turned up " +
+                    "in build/libs."
+            )
         logger.info("Loading compiled local plugin jar: {}", jarFile.absolutePath)
         pluginSet.addPluginJar(jarFile)
     }
