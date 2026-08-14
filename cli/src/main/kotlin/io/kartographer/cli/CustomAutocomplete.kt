@@ -36,13 +36,15 @@ object CustomAutocomplete {
             requestCandidates(projectDir, pipeline, words, cword)
         } catch (e: Exception) {
             // Never let completion print an error or hang: a broken pipeline, a missing
-            // daemon or a slow load must all degrade to "no suggestions", leaving Clikt's
-            // built-in completion to handle the rest.
-            return
+            // daemon or a slow load must all degrade to "no suggestions".
+            emptyList()
         }
 
-        if (candidates.isEmpty()) return
         candidates.forEach { println(it) }
+
+        // Always exit, even with nothing to suggest. Returning here would fall through to the
+        // normal command path, and the words the shell handed us are a half-typed command
+        // line — a TAB press that found no candidates would then *run* it.
         exitProcess(0)
     }
 
