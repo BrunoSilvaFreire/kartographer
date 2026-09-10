@@ -6,6 +6,7 @@ import io.cucumber.java.en.Then
 import io.kartographer.core.model.*
 import io.kartographer.tasks.containers.*
 import io.kartographer.daemon.project.KtsPipelineLoader
+import io.kartographer.core.scheduler.ConcurrentScheduler
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Files
 import java.nio.file.Path
@@ -16,7 +17,7 @@ import kotlin.test.assertTrue
 class ContainerStepDefinitions {
     private val tasks = mutableMapOf<TaskId, Node>()
     private val capturedCommands = mutableListOf<String>()
-    private var executionResult: ExecutionResult? = null
+    private var executionResult: ExecutionResult<*>? = null
     private var projectDir: Path? = null
 
     private var mockExitCode = 0
@@ -50,7 +51,7 @@ class ContainerStepDefinitions {
             executionEnvironment = mockExecutionEnv
         )
         capturedCommands.clear()
-        executionResult = task.execute(context)
+        executionResult = ConcurrentScheduler(tasks).execute(task, context, checkTopology = { true })
     }
 
     @When("we dry-run the ContainerPush task {string}")
@@ -62,7 +63,7 @@ class ContainerStepDefinitions {
             executionEnvironment = mockExecutionEnv
         )
         capturedCommands.clear()
-        executionResult = task.execute(context)
+        executionResult = ConcurrentScheduler(tasks).execute(task, context, checkTopology = { true })
     }
 
     @When("we dry-run the ContainerPush task {string} and expect failure")
@@ -74,7 +75,7 @@ class ContainerStepDefinitions {
             executionEnvironment = mockExecutionEnv
         )
         capturedCommands.clear()
-        executionResult = task.execute(context)
+        executionResult = ConcurrentScheduler(tasks).execute(task, context, checkTopology = { true })
     }
 
     @Then("the executed container command should be {string}")
@@ -94,18 +95,18 @@ class ContainerStepDefinitions {
 
     @Then("the execution result should be failure")
     fun then_result_failure() {
-        assertTrue(executionResult is ExecutionResult.Failure, "Expected Failure, got $executionResult")
+        assertTrue(executionResult is ExecutionResult.Failure<*>, "Expected Failure, got $executionResult")
     }
 
     @Then("the task {string} should require elevation")
     fun then_task_requires_elevation(name: String) {
-        val task = tasks[TaskId(name)] as Task
+        val task = tasks[TaskId(name)] as Task<*, *>
         assertTrue(task.requiresElevation, "Expected task to require elevation")
     }
 
     @Then("the task {string} should not require elevation")
     fun then_task_not_requires_elevation(name: String) {
-        val task = tasks[TaskId(name)] as Task
+        val task = tasks[TaskId(name)] as Task<*, *>
         kotlin.test.assertFalse(task.requiresElevation, "Expected task to not require elevation")
     }
 }

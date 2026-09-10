@@ -8,6 +8,8 @@ import io.kartographer.daemon.proto.CompleteResponse
 import io.kartographer.daemon.proto.DescribeProjectRequest
 import io.kartographer.daemon.proto.DescribeProjectResponse
 import io.kartographer.daemon.proto.LocalResponse
+import io.kartographer.daemon.proto.QueryRunsRequest
+import io.kartographer.daemon.proto.QueryRunsResponse
 import io.kartographer.daemon.proto.RunClientMessage
 import io.kartographer.daemon.proto.RunServerMessage
 import io.kartographer.daemon.proto.daemonInfoRequest
@@ -40,6 +42,9 @@ class DaemonConnection private constructor(
 
     fun complete(request: CompleteRequest): CompleteResponse =
         client.call(localRequest { complete = request }).unwrap { complete }
+
+    fun queryRuns(request: QueryRunsRequest): QueryRunsResponse =
+        client.call(localRequest { queryRuns = request }).unwrap { queryRuns }
 
     /**
      * Starts a run and hands back a handle for the conversation: events come back while

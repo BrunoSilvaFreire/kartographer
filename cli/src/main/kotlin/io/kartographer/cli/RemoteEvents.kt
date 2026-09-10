@@ -3,6 +3,7 @@ package io.kartographer.cli
 import io.kartographer.core.model.ExecutionEvent
 import io.kartographer.core.model.ExecutionResult
 import io.kartographer.core.model.Node
+import io.kartographer.core.model.NoOutputs
 import io.kartographer.core.model.graph.AdjacencyList
 import io.kartographer.daemon.proto.ResolvedNode
 import io.kartographer.daemon.proto.RunServerMessage
@@ -22,7 +23,7 @@ object RemoteEvents {
      * no task classes on its classpath, so the name is all there is — and all the renderers
      * ever read.
      */
-    private class RemoteNode(name: String) : Node(name)
+    private class RemoteNode(name: String, override val executionId: String = name) : Node(name)
 
     /** Returns null for messages the renderers have no event for (prompts, errors, completion). */
     fun toExecutionEvent(message: RunServerMessage): ExecutionEvent? = when (message.messageCase) {
@@ -31,16 +32,22 @@ object RemoteEvents {
             buildGraph(message.pipelineStarted.graphList)
         )
         RunServerMessage.MessageCase.TASK_QUEUED ->
-            ExecutionEvent.TaskQueued(RemoteNode(message.taskQueued.task))
+            ExecutionEvent.TaskQueued(RemoteNode(message.taskQueued.task, message.taskQueued.invocationId))
         RunServerMessage.MessageCase.TASK_STARTED ->
-            ExecutionEvent.TaskStarted(RemoteNode(message.taskStarted.task))
+            ExecutionEvent.TaskStarted(RemoteNode(message.taskStarted.task, message.taskStarted.invocationId))
         RunServerMessage.MessageCase.TASK_OUTPUT -> ExecutionEvent.TaskOutput(
-            RemoteNode(message.taskOutput.task),
+            RemoteNode(message.taskOutput.task, message.taskOutput.invocationId),
             message.taskOutput.line,
             message.taskOutput.isError
         )
+        RunServerMessage.MessageCase.TASK_OUTPUT_PRODUCED -> ExecutionEvent.TaskOutputProduced(
+            RemoteNode(message.taskOutputProduced.task, message.taskOutputProduced.invocationId),
+            message.taskOutputProduced.name,
+            message.taskOutputProduced.value,
+            message.taskOutputProduced.isSecret
+        )
         RunServerMessage.MessageCase.TASK_COMPLETED -> ExecutionEvent.TaskCompleted(
-            RemoteNode(message.taskCompleted.task),
+            RemoteNode(message.taskCompleted.task, message.taskCompleted.invocationId),
             toResult(message.taskCompleted.status, message.taskCompleted.errorMessage, message.taskCompleted.exitCode),
             message.taskCompleted.outputsMap
         )
@@ -54,18 +61,19 @@ object RemoteEvents {
         else -> null
     }
 
-    fun toResult(status: RunStatus, errorMessage: String, exitCode: Int): ExecutionResult = when (status) {
-        RunStatus.RUN_SUCCESS -> ExecutionResult.Success
-        RunStatus.RUN_UP_TO_DATE -> ExecutionResult.UpToDate
+    fun toResult(status: RunStatus, errorMessage: String, exitCode: Int): ExecutionResult<NoOutputs> = when (status) {
+        RunStatus.RUN_SUCCESS -> ExecutionResult.Success(NoOutputs())
+        RunStatus.RUN_UP_TO_DATE -> ExecutionResult.UpToDate(NoOutputs())
         else -> ExecutionResult.Failure(
             RuntimeException(errorMessage.ifBlank { "Task failed" }),
-            exitCode.takeIf { it != 0 } ?: 1
+            exitCode.takeIf { it != 0 } ?: 1,
+            NoOutputs()
         )
     }
 
     private fun buildGraph(nodes: List<ResolvedNode>): AdjacencyList<Node, Unit> {
         val graph = AdjacencyList<Node, Unit>()
-        val indices = nodes.associate { it.name to graph.push(RemoteNode(it.name)) }
+        val indices = nodes.associate { it.name to graph.push(RemoteNode(it.name, it.invocationId)) }
         for (node in nodes) {
             val from = indices[node.name] ?: continue
             for (dependency in node.dependenciesList) {

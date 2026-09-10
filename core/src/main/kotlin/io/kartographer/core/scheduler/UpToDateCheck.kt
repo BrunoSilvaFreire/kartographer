@@ -6,7 +6,7 @@ import java.nio.file.Files
 import kotlin.streams.asSequence
 
 fun interface UpToDateCheck {
-    suspend fun isUpToDate(context: ExecutionContext, task: Task): Boolean
+    suspend fun isUpToDate(context: ExecutionContext, task: Task<*, *>): Boolean
 }
 
 object UpToDateHelpers {
@@ -14,7 +14,7 @@ object UpToDateHelpers {
     fun propertiesMatch() = UpToDateCheck { context, task ->
         val oldState = TaskStateStore.loadState(context, task) ?: return@UpToDateCheck false
         val currentProps = task.registeredProperties.mapIndexed { index, prop ->
-            "prop-$index" to if (prop.isPresent()) prop.get().toString() else ""
+            "prop-$index" to prop.renderForState()
         }.toMap()
         oldState.properties == currentProps
     }
@@ -38,17 +38,17 @@ object UpToDateHelpers {
     fun outputsMatch() = UpToDateCheck { context, task ->
         val oldState = TaskStateStore.loadState(context, task) ?: return@UpToDateCheck false
 
-        if (oldState.outputFiles.isEmpty() && (task.outputs.files.isNotEmpty() || task.outputs.dirs.isNotEmpty())) {
+        if (oldState.outputFiles.isEmpty() && (task.trackedOutputs.files.isNotEmpty() || task.trackedOutputs.dirs.isNotEmpty())) {
             return@UpToDateCheck false
         }
 
-        for (f in task.outputs.files) {
+        for (f in task.trackedOutputs.files) {
             val path = context.projectDir.resolve(f)
             if (!Files.exists(path)) return@UpToDateCheck false
             val oldHash = oldState.outputFiles[f] ?: return@UpToDateCheck false
             if (TaskStateStore.calculateHash(path) != oldHash) return@UpToDateCheck false
         }
-        for (d in task.outputs.dirs) {
+        for (d in task.trackedOutputs.dirs) {
             val path = context.projectDir.resolve(d)
             if (!Files.exists(path)) return@UpToDateCheck false
             val oldHash = oldState.outputFiles[d] ?: return@UpToDateCheck false
@@ -77,7 +77,7 @@ object UpToDateHelpers {
 
     fun inputsOlderThanOutputs() = UpToDateCheck { context, task ->
         val inputPaths = (task.inputs.files + task.inputs.dirs).map { context.projectDir.resolve(it) }
-        val outputPathPaths = (task.outputs.files + task.outputs.dirs).map { context.projectDir.resolve(it) }
+        val outputPathPaths = (task.trackedOutputs.files + task.trackedOutputs.dirs).map { context.projectDir.resolve(it) }
 
         if (inputPaths.isEmpty() || outputPathPaths.isEmpty()) return@UpToDateCheck false
 

@@ -8,7 +8,7 @@ repositories {
 }
 
 dependencies {
-    implementation("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.20")
+    implementation("org.jetbrains.kotlin:kotlin-gradle-plugin:2.2.10")
     implementation(project(":core"))
     implementation(project(":tasks:gradle"))
     implementation(project(":tasks:containers"))

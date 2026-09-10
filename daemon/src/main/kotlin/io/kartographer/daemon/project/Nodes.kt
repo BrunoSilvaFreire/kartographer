@@ -19,6 +19,7 @@ object Nodes {
             if (!seen.add(node)) return
             node.dependencyObjects.forEach { visit(it) }
             node.dependencyNames.forEach { name -> all[TaskId(name)]?.let { visit(it) } }
+            node.invocationDependencyTasks().forEach { visit(it) }
         }
 
         visit(target)

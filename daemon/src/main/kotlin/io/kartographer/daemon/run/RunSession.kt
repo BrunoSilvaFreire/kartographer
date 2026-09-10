@@ -35,6 +35,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
+import io.kartographer.daemon.proto.taskOutputProduced
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.util.UUID
@@ -49,13 +50,20 @@ import java.util.concurrent.ConcurrentHashMap
 class RunSession(
     private val project: LoadedProject,
     private val start: RunStart,
-    private val outbound: Channel<RunServerMessage>
+    private val outbound: Channel<RunServerMessage>,
+    private val runTracker: RunTracker? = null
 ) {
     companion object {
         private val logger = LoggerFactory.getLogger(RunSession::class.java)
     }
 
     private val pendingPrompts = ConcurrentHashMap<String, CompletableDeferred<String>>()
+    private val stdinChannel = Channel<String>(Channel.UNLIMITED)
+
+    /** Delivers a CLI stdin chunk to running tasks. */
+    fun onStdin(data: String) {
+        stdinChannel.trySend(data)
+    }
 
     /** Delivers a CLI answer to whichever task is blocked on it. */
     fun onPromptResponse(requestId: String, value: String) {
@@ -79,7 +87,7 @@ class RunSession(
         val executionSet = Nodes.closure(target, project.nodes)
 
         try {
-            TaskProperties.applyCliValues(executionSet, start.propertiesMap)
+            TaskProperties.validateCliValues(executionSet, start.propertiesMap)
         } catch (e: IllegalArgumentException) {
             emit(runServerMessage { error = runError { message = e.message ?: "Invalid property"; exitCode = 1 } })
             return
@@ -94,30 +102,61 @@ class RunSession(
             capabilities = DaemonCapabilities.ALL
         )
 
+        val runId = UUID.randomUUID().toString()
+        val projectDir = resolveProjectDir()
+        runTracker?.onRunStarted(runId, projectDir.toString(), start.taskName)
+
         val context = ExecutionContext(
-            projectDir = resolveProjectDir(),
+            projectDir = projectDir,
             // The daemon's own environment is whatever launched it, which is not the shell the
             // user typed in — the client's environment wins.
             environment = System.getenv() + start.context.environmentMap,
             worker = worker,
-            observer = StreamObserver(),
+            observer = StreamObserver(runId),
             dryRun = start.dryRun,
-            runId = UUID.randomUUID().toString(),
-            prompter = StreamPrompter(task = null)
+            runId = runId,
+            prompter = StreamPrompter(task = null),
+            stdinChannel = stdinChannel
         )
 
-        if (!collectElevationSecret(executionSet, context)) return
+        if (!collectElevationSecret(executionSet, context)) {
+            runTracker?.onRunCompleted(runId, "FAILED")
+            return
+        }
 
         val scheduler = ConcurrentScheduler(project.nodes)
         // Dispatchers.IO because a task blocked on a prompt parks its thread until the CLI
         // answers, and that thread must not be one of the few Default workers.
-        val result = withContext(Dispatchers.IO) {
-            scheduler.execute(
-                targetNode = target,
-                context = context,
-                checkTopology = { satisfiesTopology(it, worker) }
-            )
+        val result = try {
+            withContext(Dispatchers.IO) {
+                // The values stay applied for the whole run: a task may read a property in
+                // `execute` rather than in `buildInputs`, and materialize() only holds them
+                // while inputs are built.
+                TaskProperties.withCliValues(executionSet, start.propertiesMap) {
+                    scheduler.execute(
+                        targetNode = target,
+                        context = context,
+                        checkTopology = { satisfiesTopology(it, worker) },
+                        materializeInputs = { task, taskContext ->
+                            TaskProperties.materialize(task, taskContext, start.propertiesMap)
+                        }
+                    )
+                }
+            }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            runTracker?.onRunCompleted(runId, "CANCELLED")
+            throw cancelled
+        } catch (e: Exception) {
+            runTracker?.onRunCompleted(runId, "FAILED")
+            throw e
         }
+
+        val finalRunStatus = when (result) {
+            is ExecutionResult.Success<*> -> "COMPLETED"
+            is ExecutionResult.UpToDate<*> -> "UP_TO_DATE"
+            is ExecutionResult.Failure<*> -> "FAILED"
+        }
+        runTracker?.onRunCompleted(runId, finalRunStatus)
 
         emit(runServerMessage { pipelineCompleted = result.toPipelineCompleted() })
     }
@@ -128,7 +167,7 @@ class RunSession(
      * `HostExecutionEnvironment` looks for it.
      */
     private suspend fun collectElevationSecret(executionSet: Set<Node>, context: ExecutionContext): Boolean {
-        val elevated = executionSet.filterIsInstance<Task>().filter { it.requiresElevation }
+        val elevated = executionSet.filterIsInstance<Task<*, *>>().filter { it.requiresElevation }
         if (elevated.isEmpty()) return true
 
         val alreadyRoot = System.getenv("USER") == "root" || System.getProperty("user.name") == "root"
@@ -174,7 +213,7 @@ class RunSession(
     }
 
     private fun satisfiesTopology(node: Node, worker: Worker): Boolean {
-        if (node !is Task) return true
+        if (node !is Task<*, *>) return true
         return node.topologyRequirements.all { requirement ->
             when (requirement) {
                 is TopologyRequirement.RequiresLabel -> worker.labels[requirement.key] == requirement.value
@@ -193,7 +232,7 @@ class RunSession(
     }
 
     /** Bridges scheduler events onto the wire. */
-    private inner class StreamObserver : ExecutionObserver {
+    private inner class StreamObserver(private val runId: String) : ExecutionObserver {
         override fun onEvent(event: ExecutionEvent) {
             val message = when (event) {
                 is ExecutionEvent.PipelineStarted -> runServerMessage {
@@ -202,24 +241,53 @@ class RunSession(
                         graph.addAll(graphOf(event))
                     }
                 }
-                is ExecutionEvent.TaskQueued -> runServerMessage { taskQueued = taskQueued { task = event.task.name } }
-                is ExecutionEvent.TaskStarted -> runServerMessage { taskStarted = taskStarted { task = event.task.name } }
+                is ExecutionEvent.TaskQueued -> {
+                    runTracker?.onTaskQueued(runId, event.task.executionId, event.task.name)
+                    runServerMessage { taskQueued = taskQueued { task = event.task.name; invocationId = event.task.executionId } }
+                }
+                is ExecutionEvent.TaskStarted -> {
+                    runTracker?.onTaskStarted(runId, event.task.executionId, event.task.name)
+                    runServerMessage { taskStarted = taskStarted { task = event.task.name; invocationId = event.task.executionId } }
+                }
                 is ExecutionEvent.TaskOutput -> runServerMessage {
                     taskOutput = taskOutput {
                         task = event.task.name
                         line = event.line
                         isError = event.isError
+                        invocationId = event.task.executionId
                     }
                 }
-                is ExecutionEvent.TaskCompleted -> runServerMessage {
-                    taskCompleted = taskCompleted {
-                        task = event.task.name
-                        status = event.result.toRunStatus()
-                        (event.result as? ExecutionResult.Failure)?.let { failure ->
-                            errorMessage = failure.error.localizedMessage ?: "Unknown error"
-                            exitCode = failure.exitCode ?: 1
+                is ExecutionEvent.TaskOutputProduced -> {
+                    runTracker?.onTaskOutputProduced(runId, event.task.executionId, event.task.name, event.name, event.value, event.secret)
+                    runServerMessage {
+                        taskOutputProduced = taskOutputProduced {
+                            task = event.task.name
+                            name = event.name
+                            value = if (event.secret) io.kartographer.core.model.SECRET_MASK else event.value
+                            isSecret = event.secret
+                            invocationId = event.task.executionId
                         }
-                        outputs.putAll(event.outputs)
+                    }
+                }
+                is ExecutionEvent.TaskCompleted -> {
+                    val taskState = when (event.result) {
+                        is ExecutionResult.Success<*> -> "COMPLETED"
+                        is ExecutionResult.UpToDate<*> -> "UP_TO_DATE"
+                        is ExecutionResult.Failure<*> -> "FAILED"
+                    }
+                    val errMsg = (event.result as? ExecutionResult.Failure<*>)?.error?.localizedMessage ?: ""
+                    runTracker?.onTaskCompleted(runId, event.task.executionId, event.task.name, taskState, event.outputs, errMsg)
+                    runServerMessage {
+                        taskCompleted = taskCompleted {
+                            task = event.task.name
+                            status = event.result.toRunStatus()
+                            (event.result as? ExecutionResult.Failure<*>)?.let { failure ->
+                                errorMessage = failure.error.localizedMessage ?: "Unknown error"
+                                exitCode = failure.exitCode ?: 1
+                            }
+                            outputs.putAll(event.outputs)
+                            invocationId = event.task.executionId
+                        }
                     }
                 }
                 // Prompt traffic is driven by StreamPrompter, which owns the request ids; the
@@ -239,6 +307,8 @@ class RunSession(
                 val node = event.graph.vertex(index) ?: return@mapNotNull null
                 resolvedNode {
                     name = node.name
+                    invocationId = node.executionId
+                    displayName = node.name
                     dependencies.addAll(
                         event.graph.edgesFrom(index).keys.mapNotNull { event.graph.vertex(it)?.name }
                     )
@@ -253,18 +323,22 @@ class RunSession(
      * exactly as `ConsoleUserPrompter` does while waiting on `System.console()`. Runs are
      * dispatched on [Dispatchers.IO] for that reason.
      */
-    private inner class StreamPrompter(private val task: Task?) : UserPrompter {
+    private inner class StreamPrompter(private val task: Node?) : UserPrompter {
+        override fun forTask(task: Node): UserPrompter = StreamPrompter(task)
+
         override fun prompt(message: String, secret: Boolean): String {
             val requestId = UUID.randomUUID().toString()
             val deferred = CompletableDeferred<String>()
             pendingPrompts[requestId] = deferred
             // Read outside the builder: inside it, `task` would resolve to the message field.
             val taskName = task?.name
+            val invocationId = task?.executionId
 
             emit(runServerMessage {
                 promptRequested = promptRequested {
                     this.requestId = requestId
                     taskName?.let { this.task = it }
+                    invocationId?.let { this.invocationId = it }
                     this.message = message
                     this.secret = secret
                     kind = PromptKind.PROMPT_GENERIC
@@ -285,19 +359,20 @@ class RunSession(
 /** Capabilities the daemon advertises, matching the task modules on its classpath. */
 object DaemonCapabilities {
     val ALL = setOf(
-        "local-exec", "ansible", "apt", "docker", "flutter", "go", "gradle", "protoc", "pulumi", "python"
+        "local-exec", "ansible", "apt", "dart", "docker", "flutter", "go", "gradle", "kubectl",
+        "protoc", "pulumi", "python"
     )
 }
 
-private fun ExecutionResult.toRunStatus(): RunStatus = when (this) {
-    is ExecutionResult.Success -> RunStatus.RUN_SUCCESS
-    is ExecutionResult.UpToDate -> RunStatus.RUN_UP_TO_DATE
-    is ExecutionResult.Failure -> RunStatus.RUN_FAILURE
+private fun ExecutionResult<*>.toRunStatus(): RunStatus = when (this) {
+    is ExecutionResult.Success<*> -> RunStatus.RUN_SUCCESS
+    is ExecutionResult.UpToDate<*> -> RunStatus.RUN_UP_TO_DATE
+    is ExecutionResult.Failure<*> -> RunStatus.RUN_FAILURE
 }
 
-private fun ExecutionResult.toPipelineCompleted() = pipelineCompleted {
+private fun ExecutionResult<*>.toPipelineCompleted() = pipelineCompleted {
     status = this@toPipelineCompleted.toRunStatus()
-    (this@toPipelineCompleted as? ExecutionResult.Failure)?.let { failure ->
+    (this@toPipelineCompleted as? ExecutionResult.Failure<*>)?.let { failure ->
         errorMessage = failure.error.localizedMessage ?: "Unknown error"
         exitCode = failure.exitCode ?: 1
     }

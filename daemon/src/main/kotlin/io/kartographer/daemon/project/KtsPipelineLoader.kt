@@ -12,6 +12,7 @@ import java.io.File
 import java.security.MessageDigest
 import kotlin.script.experimental.api.EvaluationResult
 import kotlin.script.experimental.api.ResultWithDiagnostics
+import kotlin.script.experimental.api.ResultValue
 import kotlin.script.experimental.api.ScriptEvaluationConfiguration
 import kotlin.script.experimental.host.ScriptingHostConfiguration
 import kotlin.script.experimental.host.toScriptSource
@@ -61,6 +62,7 @@ class KtsPipelineLoader {
         if (!scriptFile.exists()) {
             throw IllegalArgumentException("Script file not found: $sourcePath")
         }
+        registry.projectDirectory = scriptFile.parentFile.absolutePath
 
         compileLocalPluginIfPresent(scriptFile.parentFile, pluginSet)
 
@@ -89,7 +91,11 @@ class KtsPipelineLoader {
         }
 
         return when (result) {
-            is ResultWithDiagnostics.Success<EvaluationResult> -> registry.nodes
+            is ResultWithDiagnostics.Success<EvaluationResult> -> {
+                val runtimeError = result.value.returnValue as? ResultValue.Error
+                if (runtimeError != null) throw runtimeError.error
+                registry.nodes
+            }
             is ResultWithDiagnostics.Failure -> {
                 val errors = result.reports.joinToString("\n") { it.render() }
                 throw RuntimeException("Failed to compile or execute script:\n$errors")

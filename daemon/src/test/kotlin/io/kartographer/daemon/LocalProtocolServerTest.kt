@@ -171,4 +171,75 @@ class LocalProtocolServerTest {
             assertTrue(output.any { it.contains("hello-from-task") }, "no streamed output, got: $output")
         }
     }
+
+    @Test
+    fun `queryRuns returns tracked runs over local protocol`(@TempDir dir: File) {
+        val socket = startServer(dir)
+        writeProject(dir, "assemble")
+
+        LocalProtocol.Client.connect(socket.toPath()).use { client ->
+            val response = client.call(
+                localRequest {
+                    queryRuns = io.kartographer.daemon.proto.queryRunsRequest { activeOnly = false }
+                }
+            )
+            assertEquals(LocalResponse.ResponseCase.QUERY_RUNS, response.responseCase)
+            assertNotNull(response.queryRuns.runsList)
+        }
+    }
+
+    @Test
+    fun `interactive stdin is forwarded to running task`(@TempDir dir: File) {
+        val socket = startServer(dir)
+        File(dir, "karto.kts").writeText(
+            """
+            task<DefaultTask>("interactive") {
+                action { context ->
+                    context.executeBash { command("sh"); args("-c", "read line; echo received-${'$'}{'$'}line") }
+                }
+            }
+            """.trimIndent()
+        )
+
+        LocalProtocol.Client.connect(socket.toPath()).use { client ->
+            client.send(
+                localRequest {
+                    run = runClientMessage {
+                        start = runStart {
+                            context = contextFor(dir)
+                            taskName = "interactive"
+                        }
+                    }
+                }
+            )
+
+            // Send stdin data to the running task
+            Thread.sleep(200)
+            client.send(
+                localRequest {
+                    run = runClientMessage {
+                        stdinData = io.kartographer.daemon.proto.stdinData {
+                            data = "foo\n"
+                        }
+                    }
+                }
+            )
+
+            val output = mutableListOf<String>()
+            while (true) {
+                val response = client.receive() ?: break
+                if (response.responseCase != LocalResponse.ResponseCase.RUN) continue
+                val run = response.run
+                if (run.messageCase == RunServerMessage.MessageCase.ERROR) {
+                    error(run.error.message)
+                }
+                if (run.messageCase == RunServerMessage.MessageCase.TASK_OUTPUT) {
+                    output.add(run.taskOutput.line)
+                }
+                if (run.messageCase == RunServerMessage.MessageCase.PIPELINE_COMPLETED) break
+            }
+
+            assertTrue(output.any { it.contains("received-foo") }, "stdin was not forwarded to task, got: $output")
+        }
+    }
 }

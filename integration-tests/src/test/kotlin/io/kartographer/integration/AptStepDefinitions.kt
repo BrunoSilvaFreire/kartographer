@@ -6,6 +6,7 @@ import io.cucumber.java.en.Then
 import io.kartographer.core.model.*
 import io.kartographer.tasks.apt.*
 import io.kartographer.daemon.project.KtsPipelineLoader
+import io.kartographer.core.scheduler.ConcurrentScheduler
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Files
 import java.nio.file.Path
@@ -17,7 +18,7 @@ class AptStepDefinitions {
     private var projectDir: Path? = null
     private val tasks = mutableMapOf<TaskId, Node>()
     private val capturedCommands = mutableListOf<String>()
-    private var executionResult: ExecutionResult? = null
+    private var executionResult: ExecutionResult<*>? = null
 
     private val mockExecutionEnv = object : ExecutionEnvironment {
         override suspend fun execute(command: String, workingDir: String, environment: Map<String, String>, requiresElevation: Boolean): Int {
@@ -54,7 +55,7 @@ class AptStepDefinitions {
             executionEnvironment = mockExecutionEnv
         )
         capturedCommands.clear()
-        executionResult = task.execute(context)
+        executionResult = ConcurrentScheduler(tasks).execute(task, context, checkTopology = { true })
     }
 
     @When("we dry-run the AptInstall task {string}")
@@ -66,7 +67,7 @@ class AptStepDefinitions {
             executionEnvironment = mockExecutionEnv
         )
         capturedCommands.clear()
-        executionResult = task.execute(context)
+        executionResult = ConcurrentScheduler(tasks).execute(task, context, checkTopology = { true })
     }
 
     @When("we dry-run the AptInstall task {string} and expect failure")
@@ -78,7 +79,7 @@ class AptStepDefinitions {
             executionEnvironment = mockExecutionEnv
         )
         capturedCommands.clear()
-        executionResult = task.execute(context)
+        executionResult = ConcurrentScheduler(tasks).execute(task, context, checkTopology = { true })
     }
 
     @Then("the executed apt command should start with {string}")
@@ -90,15 +91,13 @@ class AptStepDefinitions {
 
     @Then("the executed apt command should end with {string}")
     fun then_apt_command_ends(expectedEnd: String) {
-        val cmd = capturedCommands.firstOrNull()
-        assertNotNull(cmd, "No command was generated")
-        assertTrue(cmd.contains(expectedEnd), "Command '$cmd' did not contain '$expectedEnd'")
+        assertTrue(capturedCommands.any { it.contains(expectedEnd) }, "No command contained '$expectedEnd': $capturedCommands")
     }
 
     @Then("the apt task execution should fail with IllegalArgumentException")
     fun then_apt_fails_illegal_arg() {
         val res = executionResult
-        assertTrue(res is ExecutionResult.Failure, "Expected failure but got $res")
+        assertTrue(res is ExecutionResult.Failure<*>, "Expected failure but got $res")
         assertTrue(res.error is IllegalArgumentException, "Expected IllegalArgumentException but got ${res.error}")
     }
 }

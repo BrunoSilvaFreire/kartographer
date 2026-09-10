@@ -1,11 +1,22 @@
 package io.kartographer.tasks.ansible
 
-import io.kartographer.tasks.DefaultTask
 import io.kartographer.core.model.ExecutionContext
 import io.kartographer.core.model.ExecutionResult
+import io.kartographer.core.model.InputSet
+import io.kartographer.core.model.NoOutputs
+import io.kartographer.core.model.Task
 import io.kartographer.core.model.executeBash
 
-open class AnsiblePlaybookRun(name: String) : DefaultTask(name) {
+data class AnsibleInputs(
+    var playbook: String,
+    var inventory: String?,
+    var ansibleBin: String,
+    var extraVars: Map<String, String>,
+    var tags: List<String>,
+    var args: List<String>
+) : InputSet()
+
+open class AnsiblePlaybookRun(name: String) : Task<AnsibleInputs, NoOutputs>(name) {
     val playbook = property<String>()
     val inventory = property<String>()
     val ansibleBin = property<String> { set("ansible-playbook") }
@@ -20,25 +31,30 @@ open class AnsiblePlaybookRun(name: String) : DefaultTask(name) {
         topology { requiresCapability("ansible") }
     }
 
-    override suspend fun execute(context: ExecutionContext): ExecutionResult {
+    override suspend fun buildInputs(context: ExecutionContext) = AnsibleInputs(
+        playbook.get(), inventory.orNull(), ansibleBin.get(), extraVars.toMap(), tags.toList(), args.toList()
+    )
+    override fun buildOutputs() = NoOutputs()
+
+    override suspend fun execute(context: ExecutionContext, inputSet: AnsibleInputs): ExecutionResult<NoOutputs> {
         return context.executeBash {
-            command(ansibleBin.get())
-            args(playbook.get())
+            command(inputSet.ansibleBin)
+            args(inputSet.playbook)
             
-            if (inventory.isPresent()) {
-                args("-i", inventory.get())
+            if (inputSet.inventory != null) {
+                args("-i", inputSet.inventory!!)
             }
             
-            if (tags.isNotEmpty()) {
-                args("--tags", tags.joinToString(","))
+            if (inputSet.tags.isNotEmpty()) {
+                args("--tags", inputSet.tags.joinToString(","))
             }
             
-            if (extraVars.isNotEmpty()) {
-                val varsString = extraVars.map { "${it.key}=${it.value}" }.joinToString(" ")
+            if (inputSet.extraVars.isNotEmpty()) {
+                val varsString = inputSet.extraVars.map { "${it.key}=${it.value}" }.joinToString(" ")
                 args("--extra-vars", varsString)
             }
             
-            args(this@AnsiblePlaybookRun.args)
+            args(inputSet.args)
         }
     }
 }

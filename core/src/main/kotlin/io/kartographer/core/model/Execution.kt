@@ -4,6 +4,7 @@ import java.nio.file.Path
 
 interface UserPrompter {
     fun prompt(message: String, secret: Boolean = false): String
+    fun forTask(task: Node): UserPrompter = this
 }
 
 interface ExecutionEnvironment {
@@ -12,7 +13,16 @@ interface ExecutionEnvironment {
         workingDir: String,
         environment: Map<String, String>,
         requiresElevation: Boolean
-    ): Int
+    ): Int = execute(command, workingDir, environment, requiresElevation, null, null)
+
+    suspend fun execute(
+        command: String,
+        workingDir: String,
+        environment: Map<String, String>,
+        requiresElevation: Boolean,
+        onStdoutLine: ((String) -> Unit)?,
+        onStderrLine: ((String) -> Unit)?
+    ): Int = execute(command, workingDir, environment, requiresElevation)
 }
 
 data class ExecutionContext(
@@ -27,20 +37,39 @@ data class ExecutionContext(
     val redirectError: ProcessBuilder.Redirect? = null,
     val prompter: UserPrompter = io.kartographer.local.ConsoleUserPrompter(),
     val executionEnvironment: ExecutionEnvironment? = null,
-    val task: Task? = null
+    val task: Task<*, *>? = null,
+    val executionNode: Node? = null,
+    val invocationId: String? = null,
+    val inputHash: String? = null,
+    val stdinChannel: kotlinx.coroutines.channels.ReceiveChannel<String>? = null
 )
 
-sealed interface ExecutionResult {
-    data object Success : ExecutionResult
-    data object UpToDate : ExecutionResult
-    
-    data class Failure(val error: Throwable, val exitCode: Int? = null) : ExecutionResult
+fun <T> ExecutionContext.emitOutput(output: Output<T>, value: T) {
+    output.set(value)
+    val node = executionNode ?: task
+    if (node != null) {
+        observer?.onEvent(ExecutionEvent.TaskOutputProduced(node, output.name, value.toString(), output.secret))
+    }
+}
+
+sealed interface ExecutionResult<out O : OutputSet> {
+    val outputs: O
+
+    data class Success<O : OutputSet>(override val outputs: O) : ExecutionResult<O>
+    data class UpToDate<O : OutputSet>(override val outputs: O) : ExecutionResult<O>
+    data class Failure<O : OutputSet>(
+        val error: Throwable,
+        val exitCode: Int? = null,
+        override val outputs: O
+    ) : ExecutionResult<O>
 }
 
 abstract class ExecSpec {
     var workingDir: String? = null
     var requiresElevation: Boolean = false
     val environment = mutableMapOf<String, String>()
+    var onStdoutLine: ((String) -> Unit)? = null
+    var onStderrLine: ((String) -> Unit)? = null
 
     abstract fun buildCommandLine(): String
 
@@ -75,7 +104,7 @@ class BashSpec : ExecSpec() {
     }
 }
 
-suspend fun ExecutionContext.executeSpec(spec: ExecSpec): ExecutionResult {
+suspend fun ExecutionContext.executeSpec(spec: ExecSpec): ExecutionResult<NoOutputs> {
     val mergedEnv = this.environment + spec.environment
     val resolvedWorkingDir = spec.workingDir ?: this.projectDir.toString()
 
@@ -83,21 +112,29 @@ suspend fun ExecutionContext.executeSpec(spec: ExecSpec): ExecutionResult {
 
     if (this.dryRun) {
         org.slf4j.LoggerFactory.getLogger("ExecSpec").info("[DRY-RUN] Executing: {}", cmdLine)
-        return ExecutionResult.Success
+        return ExecutionResult.Success(NoOutputs())
     }
 
-    val exitCode = this.executionEnvironment?.execute(cmdLine, resolvedWorkingDir, mergedEnv, spec.requiresElevation) ?: -1
+    val exitCode = this.executionEnvironment?.execute(
+        cmdLine,
+        resolvedWorkingDir,
+        mergedEnv,
+        spec.requiresElevation,
+        spec.onStdoutLine,
+        spec.onStderrLine
+    ) ?: -1
     if (exitCode != 0) {
         return ExecutionResult.Failure(
             RuntimeException("Command '$cmdLine' failed with exit code $exitCode"),
-            exitCode
+            exitCode,
+            NoOutputs()
         )
     }
 
-    return ExecutionResult.Success
+    return ExecutionResult.Success(NoOutputs())
 }
 
-suspend fun ExecutionContext.executeBash(block: BashSpec.() -> Unit): ExecutionResult {
+suspend fun ExecutionContext.executeBash(block: BashSpec.() -> Unit): ExecutionResult<NoOutputs> {
     val spec = BashSpec().apply(block)
     return executeSpec(spec)
 }

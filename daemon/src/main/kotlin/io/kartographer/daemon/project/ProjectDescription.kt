@@ -2,7 +2,7 @@ package io.kartographer.daemon.project
 
 import io.kartographer.core.model.Node
 import io.kartographer.core.model.Task
-import io.kartographer.core.scheduler.DagScheduler
+import io.kartographer.core.scheduler.describeInvocationGraph
 import io.kartographer.daemon.proto.DescribeProjectResponse
 import io.kartographer.daemon.proto.describeProjectResponse
 import io.kartographer.daemon.proto.nodeInfo
@@ -30,12 +30,16 @@ object ProjectDescription {
                         name = id.value
                         type = node::class.simpleName ?: "Node"
                         // As declared, not resolved — this is what the `tasks` table shows.
-                        dependencies.addAll(node.dependencyNames + node.dependencyObjects.map { it.name })
-                        isTask = node is Task
-                        if (node is Task) {
+                        dependencies.addAll(
+                            node.dependencyNames + node.dependencyObjects.map { it.name } +
+                                node.invocationDependencyNames()
+                        )
+                        isTask = node is Task<*, *>
+                        if (node is Task<*, *>) {
                             requiresElevation = node.requiresElevation
-                            properties.addAll(propertiesOf(node))
+                            alwaysRuns = node.alwaysRuns
                         }
+                        properties.addAll(propertiesOf(node))
                     }
                 )
             }
@@ -43,12 +47,14 @@ object ProjectDescription {
             // Resolution can legitimately fail (cycle, missing dependency). `tasks` must still
             // render in that case, so the failure travels as a field rather than an RPC error.
             try {
-                val resolved = DagScheduler(nodes).resolveDependencies()
-                for ((node, deps) in resolved) {
+                val resolved = describeInvocationGraph(nodes)
+                for (node in resolved) {
                     graph.add(
                         resolvedNode {
-                            name = node.name
-                            dependencies.addAll(deps.map { it.name })
+                            name = node.displayName
+                            invocationId = node.invocationId
+                            displayName = node.displayName
+                            dependencies.addAll(node.dependencies)
                         }
                     )
                 }
@@ -58,17 +64,27 @@ object ProjectDescription {
         }
     }
 
-    private fun propertiesOf(task: Task) = TaskProperties.declaredOn(task).map { declared ->
-        val property = declared.property
-        propertyInfo {
-            name = declared.fieldName
-            property.cliName?.let { cliName = it }
-            property.cliDescription?.let { description = it }
-            typeName = TaskProperties.typeNameOf(declared)
-            property.literalCompletions?.let { literalCompletions.addAll(it) }
-            // Dynamic providers are arbitrary suspend code held by the task, so they can only
-            // be evaluated here on the daemon — the CLI asks for them via Complete.
-            hasDynamicCompletions = property.literalCompletions == null && property.completionProvider != null
+    private fun propertiesOf(node: Node) = when (node) {
+        is Task<*, *> -> TaskProperties.declaredOn(node).map { declared ->
+            val property = declared.property
+            propertyInfo {
+                name = declared.fieldName
+                property.cliName?.let { cliName = it }
+                property.cliDescription?.let { description = it }
+                typeName = TaskProperties.typeNameOf(declared)
+                property.literalCompletions?.let { literalCompletions.addAll(it) }
+                hasDynamicCompletions = property.literalCompletions == null && property.completionProvider != null
+            }
+        }
+        else -> node.registeredProperties.map { property ->
+            propertyInfo {
+                name = property.cliName ?: "property"
+                property.cliName?.let { cliName = it }
+                property.cliDescription?.let { description = it }
+                typeName = property.typeName ?: "Unknown"
+                property.literalCompletions?.let { literalCompletions.addAll(it) }
+                hasDynamicCompletions = property.literalCompletions == null && property.completionProvider != null
+            }
         }
     }
 

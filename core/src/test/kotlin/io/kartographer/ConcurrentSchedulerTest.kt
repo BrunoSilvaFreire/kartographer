@@ -125,8 +125,10 @@ class ConcurrentSchedulerTest {
 
     @Test
     fun testUncaughtCustomTaskExceptionFailsPipeline() = runBlocking {
-        val task = object : Task("throws") {
-            override suspend fun execute(context: ExecutionContext): ExecutionResult {
+        val task = object : Task<NoInputs, NoOutputs>("throws") {
+            override suspend fun buildInputs(context: ExecutionContext) = NoInputs()
+            override fun buildOutputs() = NoOutputs()
+            override suspend fun execute(context: ExecutionContext, inputSet: NoInputs): ExecutionResult<NoOutputs> {
                 throw IllegalStateException("uncaught task failure")
             }
         }
@@ -139,7 +141,7 @@ class ConcurrentSchedulerTest {
         val result = scheduler.execute(task, context, { true })
 
         assertTrue(result is ExecutionResult.Failure)
-        val failure = result as ExecutionResult.Failure
+        val failure = result as ExecutionResult.Failure<*>
         assertEquals(1, failure.exitCode)
         assertEquals("uncaught task failure", failure.error.message)
     }

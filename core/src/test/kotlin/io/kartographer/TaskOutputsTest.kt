@@ -1,61 +1,58 @@
 package io.kartographer
 
-import io.kartographer.core.model.ExecutionContext
-import io.kartographer.core.model.ExecutionResult
-import io.kartographer.core.model.SECRET_MASK
-import io.kartographer.core.model.Task
+import io.kartographer.core.model.*
 import org.junit.jupiter.api.Assertions.assertEquals
+import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
 
-private class OutputtingTask(name: String) : Task(name) {
-    val image = property<String>().asOutput("image")
-    val token = property<String>().asOutput("token", secret = true)
-    val internal = property<String>()
-    val digest = output("digest") { "sha256:${image.get()}" }
+private class TestOutputs : OutputSet() {
+    val image = output<String>("image")
+    val token = output<String>("token", secret = true)
+    val digest = output<String>("digest")
+}
 
+private class OutputtingTask(name: String) : Task<NoInputs, TestOutputs>(name) {
     var failAfterImage = false
-
-    override suspend fun execute(context: ExecutionContext): ExecutionResult {
-        image.set("my-app:1.0")
-        if (failAfterImage) return ExecutionResult.Failure(RuntimeException("boom"))
-        token.set("hunter2")
-        internal.set("not-an-output")
-        return ExecutionResult.Success
+    override suspend fun buildInputs(context: ExecutionContext) = NoInputs()
+    override fun buildOutputs() = TestOutputs()
+    override suspend fun execute(context: ExecutionContext, inputSet: NoInputs): ExecutionResult<TestOutputs> {
+        if (failAfterImage) return failure(RuntimeException("boom")) { image.set("my-app:1.0") }
+        return success {
+            image.set("my-app:1.0")
+            token.set("hunter2")
+            digest.set("sha256:my-app:1.0")
+        }
     }
 }
 
 class TaskOutputsTest {
-
-    @Test
-    fun collectsDeclaredOutputsAndMasksSecrets() = kotlinx.coroutines.runBlocking {
-        val task = OutputtingTask("build")
-        task.execute(context())
-
+    @Test fun typedOutputsMaskSecrets() = kotlinx.coroutines.runBlocking {
+        val result = OutputtingTask("build").execute(context()) as ExecutionResult.Success<*>
         assertEquals(
             mapOf("image" to "my-app:1.0", "token" to SECRET_MASK, "digest" to "sha256:my-app:1.0"),
-            task.collectOutputs()
+            result.outputs.rendered()
         )
     }
 
-    @Test
-    fun reportsNothingBeforeExecution() {
-        // `digest` would throw on an unset `image`; collection must swallow that.
-        assertEquals(emptyMap<String, String>(), OutputtingTask("build").collectOutputs())
-    }
-
-    @Test
-    fun collectsWhatWasSetBeforeAFailure() = kotlinx.coroutines.runBlocking {
+    @Test fun partialOutputsSurviveFailure() = kotlinx.coroutines.runBlocking {
         val task = OutputtingTask("build").apply { failAfterImage = true }
-        task.execute(context())
+        val result = task.execute(context()) as ExecutionResult.Failure<*>
+        assertEquals(mapOf("image" to "my-app:1.0"), result.outputs.rendered())
+    }
 
-        assertEquals(
-            mapOf("image" to "my-app:1.0", "digest" to "sha256:my-app:1.0"),
-            task.collectOutputs()
-        )
+    @Test fun emitOutputSetsValueAndEmitsEvent() {
+        val outputs = TestOutputs()
+        val events = mutableListOf<ExecutionEvent>()
+        val node = object : Node("build") {}
+        val ctx = context().copy(executionNode = node, observer = object : ExecutionObserver {
+            override fun onEvent(event: ExecutionEvent) { events.add(event) }
+        })
+        ctx.emitOutput(outputs.image, "dynamicValue")
+        assertEquals("dynamicValue", runBlocking { outputs.image.get() })
+        assertEquals("image", events.filterIsInstance<ExecutionEvent.TaskOutputProduced>().single().name)
     }
 
     private fun context() = ExecutionContext(
-        projectDir = java.nio.file.Paths.get("").toAbsolutePath(),
-        worker = io.kartographer.core.model.Worker(io.kartographer.core.model.WorkerId("test-worker"))
+        java.nio.file.Paths.get("").toAbsolutePath(), worker = Worker(WorkerId("test-worker"))
     )
 }

@@ -5,6 +5,9 @@ import io.grpc.ManagedChannelBuilder
 import io.kartographer.core.model.ExecutionContext
 import io.kartographer.core.model.ExecutionResult
 import io.kartographer.core.model.Task
+import io.kartographer.core.model.InputSet
+import io.kartographer.core.model.InputSetCodec
+import io.kartographer.core.model.OutputSetCodec
 import io.kartographer.core.plugins.TaskSerializer
 import io.kartographer.daemon.proto.*
 import io.kartographer.daemon.proto.KartographerDaemonGrpcKt.KartographerDaemonCoroutineStub
@@ -24,7 +27,16 @@ class RemoteWorkerClient(private val host: String, private val port: Int) : Clos
 
     private val stub = KartographerDaemonCoroutineStub(channel)
 
-    suspend fun executeRemote(task: Task, context: ExecutionContext): ExecutionResult {
+    suspend fun executeRemote(
+        task: Task<*, *>,
+        context: ExecutionContext,
+        // Null rather than a default of `task.buildInputsAny(context)`: building
+        // inputs suspends now, and Kotlin cannot call a suspend function from a
+        // default parameter value.
+        inputSet: InputSet? = null
+    ): ExecutionResult<*> {
+        @Suppress("NAME_SHADOWING")
+        val inputSet = inputSet ?: task.buildInputsAny(context)
         val serializedProps = TaskSerializer.serializeProperties(task)
         
         val request = executeTaskRequest {
@@ -34,11 +46,13 @@ class RemoteWorkerClient(private val host: String, private val port: Int) : Clos
             properties.putAll(serializedProps)
             inputFiles.addAll(task.inputs.files)
             inputDirs.addAll(task.inputs.dirs)
-            outputFiles.addAll(task.outputs.files)
-            outputDirs.addAll(task.outputs.dirs)
+            outputFiles.addAll(task.trackedOutputs.files)
+            outputDirs.addAll(task.trackedOutputs.dirs)
             projectDir = context.projectDir.toString()
             environment.putAll(context.environment)
             dryRun = context.dryRun
+            inputSetJson = InputSetCodec.canonical(inputSet)
+            invocationId = context.invocationId ?: task.name
         }
 
         return try {
@@ -46,18 +60,24 @@ class RemoteWorkerClient(private val host: String, private val port: Int) : Clos
             logger.info("[REMOTE] [{}] Execution complete on worker. Remote log file: {}", task.name, response.logPath)
             
             when (response.status) {
-                ExecuteTaskResponse.Status.SUCCESS -> ExecutionResult.Success
-                ExecuteTaskResponse.Status.UP_TO_DATE -> ExecutionResult.UpToDate
+                ExecuteTaskResponse.Status.SUCCESS -> ExecutionResult.Success(
+                    OutputSetCodec.restore(task.buildOutputsAny(), response.outputSetJson)
+                )
+                ExecuteTaskResponse.Status.UP_TO_DATE -> ExecutionResult.UpToDate(
+                    OutputSetCodec.restore(task.buildOutputsAny(), response.outputSetJson)
+                )
                 ExecuteTaskResponse.Status.FAILURE, ExecuteTaskResponse.Status.UNRECOGNIZED, null -> {
                     ExecutionResult.Failure(
                         error = RuntimeException(response.errorMessage.ifBlank { "Remote task execution failed" }),
-                        exitCode = response.exitCode
+                        exitCode = response.exitCode,
+                        outputs = task.buildOutputsAny()
                     )
                 }
             }
         } catch (e: Exception) {
             ExecutionResult.Failure(
-                error = RuntimeException("gRPC call to remote worker failed: ${e.localizedMessage}", e)
+                error = RuntimeException("gRPC call to remote worker failed: ${e.localizedMessage}", e),
+                outputs = task.buildOutputsAny()
             )
         }
     }

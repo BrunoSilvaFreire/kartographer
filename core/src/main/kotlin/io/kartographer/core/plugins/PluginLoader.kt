@@ -4,6 +4,8 @@ import io.kartographer.core.model.Task
 import org.slf4j.LoggerFactory
 import java.io.Closeable
 import java.io.File
+import java.io.IOException
+import java.net.URL
 import java.net.URLClassLoader
 import java.util.ServiceLoader
 
@@ -26,7 +28,7 @@ class PluginSet(
 
     private var classLoader: URLClassLoader? = null
     private val loadedModules = mutableListOf<KartographerModule>()
-    private val taskTypeMap = mutableMapOf<String, Class<out Task>>()
+    private val taskTypeMap = mutableMapOf<String, Class<out Task<*, *>>>()
     private val dynamicJars = mutableListOf<File>()
 
     init {
@@ -76,7 +78,7 @@ class PluginSet(
             logger.warn("Failed to close old classLoader: {}", e.localizedMessage)
         }
 
-        classLoader = if (urls.isEmpty()) null else URLClassLoader(urls.toTypedArray(), parentClassLoader)
+        classLoader = if (urls.isEmpty()) null else PluginClassLoader(urls.toTypedArray(), parentClassLoader)
 
         loadedModules.clear()
         taskTypeMap.clear()
@@ -86,9 +88,9 @@ class PluginSet(
             // ServiceLoader walks the whole delegation chain, so a project set also picks up
             // the modules its parent (the global set) provides.
             for (module in ServiceLoader.load(KartographerModule::class.java, activeLoader)) {
-                if (loadedModules.none { it.id == module.id }) {
-                    loadedModules.add(module)
-                }
+                // Prefer the local implementation when the parent exposes the same module.
+                if (loadedModules.any { it.id == module.id }) continue
+                loadedModules.add(module)
                 for (type in module.taskTypes) {
                     taskTypeMap[type.name] = type
                     taskTypeMap[type.simpleName] = type
@@ -113,12 +115,12 @@ class PluginSet(
     @Synchronized
     fun getPluginJars(): List<File> = (dynamicJars + directoryJars()).distinct()
 
-    fun findTaskClass(className: String): Class<out Task>? {
+    fun findTaskClass(className: String): Class<out Task<*, *>>? {
         taskTypeMap[className]?.let { return it }
 
         return try {
             @Suppress("UNCHECKED_CAST")
-            Class.forName(className, true, getClassLoader()) as Class<out Task>
+            Class.forName(className, true, getClassLoader()) as Class<out Task<*, *>>
         } catch (e: ClassNotFoundException) {
             null
         }
@@ -139,6 +141,53 @@ class PluginSet(
         loadedModules.clear()
         taskTypeMap.clear()
         dynamicJars.clear()
+    }
+}
+
+/**
+ * Loads plugin implementations before consulting the parent loader. The parent still owns
+ * Kartographer's API and runtime classes, while a project-local plugin can replace a stale
+ * global implementation with the same class names.
+ */
+private class PluginClassLoader(urls: Array<URL>, private val parentLoader: ClassLoader) :
+    URLClassLoader(urls, parentLoader) {
+    private val parentFirstPrefixes = listOf(
+        "java.",
+        "javax.",
+        "jdk.",
+        "sun.",
+        "kotlin.",
+        "kotlinx.",
+        "org.slf4j.",
+        "io.kartographer.core."
+    )
+
+    override fun loadClass(name: String, resolve: Boolean): Class<*> =
+        synchronized(getClassLoadingLock(name)) {
+            findLoadedClass(name)?.let { return@synchronized it }
+
+            if (!parentFirstPrefixes.any(name::startsWith)) {
+                try {
+                    val local = findClass(name)
+                    if (resolve) resolveClass(local)
+                    return@synchronized local
+                } catch (_: ClassNotFoundException) {
+                    // The implementation may be supplied by the parent or runtime classpath.
+                }
+            }
+
+            super.loadClass(name, resolve)
+        }
+
+    override fun getResources(name: String): java.util.Enumeration<URL> {
+        val resources = mutableListOf<URL>()
+        try {
+            resources += findResources(name).asSequence().toList()
+        } catch (_: IOException) {
+            // Fall through to parent resources; class loading will report missing classes.
+        }
+        resources += parentLoader.getResources(name).asSequence().toList()
+        return java.util.Collections.enumeration(resources)
     }
 }
 
@@ -172,7 +221,7 @@ object PluginLoader {
 
     fun getPluginJars(): List<File> = globalSet.getPluginJars()
 
-    fun findTaskClass(className: String): Class<out Task>? = globalSet.findTaskClass(className)
+    fun findTaskClass(className: String): Class<out Task<*, *>>? = globalSet.findTaskClass(className)
 
     private fun defaultParentClassLoader(): ClassLoader =
         Thread.currentThread().contextClassLoader ?: this::class.java.classLoader

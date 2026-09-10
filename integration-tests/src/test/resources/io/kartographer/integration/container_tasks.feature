@@ -12,6 +12,7 @@ Feature: Container Tasks
     When we dry-run the ContainerBuild task "docker-build-versioned"
     And we dry-run the ContainerPush task "docker-push"
     Then the executed container commands should be:
+      | docker build -t my-app:1.0 -f Dockerfile --build-arg VERSION=1.0 . |
       | docker tag my-app:1.0 my-reg.com/my-app:1.0 |
       | docker push my-reg.com/my-app:1.0           |
 

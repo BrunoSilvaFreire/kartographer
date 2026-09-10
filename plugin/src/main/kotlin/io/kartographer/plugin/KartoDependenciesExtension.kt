@@ -34,6 +34,14 @@ open class KartoDependenciesExtension @Inject constructor(private val project: P
         project.dependencies.add("implementation", "io.kartographer:flutter:$version")
     }
 
+    fun dart() {
+        project.dependencies.add("implementation", "io.kartographer:dart:$version")
+    }
+
+    fun kubernetes() {
+        project.dependencies.add("implementation", "io.kartographer:kubernetes:$version")
+    }
+
     fun pulumi() {
         project.dependencies.add("implementation", "io.kartographer:pulumi:$version")
     }

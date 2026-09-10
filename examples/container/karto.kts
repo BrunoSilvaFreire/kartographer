@@ -14,7 +14,8 @@ val buildVersioned = task<ContainerBuild>("docker-build-versioned") {
 }
 
 task<ContainerPush>("docker-push") {
-    imageRef.setProvider(buildVersioned.imageRef)
+    val builtImage = dependsOn(buildVersioned)
+    imageRef.setProvider(builtImage.imageRef)
     registry.set("my-reg.com")
 }
 
@@ -22,7 +23,7 @@ task<ContainerBuild>("container-build-full") {
     imageName.set("my-app")
     containerfile.set("Dockerfile")
     context.set(".")
-    platform.set("linux/amd64")
+    platforms.set(listOf("linux/amd64"))
     version.set("2.0.0")
     containerClient.set(ContainerClient.NERDCTL_ROOTFUL)
 }

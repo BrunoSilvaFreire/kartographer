@@ -3,6 +3,8 @@ package io.kartographer.tasks
 import io.kartographer.core.model.Task
 import io.kartographer.core.model.ExecutionContext
 import io.kartographer.core.model.ExecutionResult
+import io.kartographer.core.model.InputSet
+import io.kartographer.core.model.NoOutputs
 import io.kartographer.misc.FileFilter
 import io.kartographer.misc.FilePaths
 import kotlinx.coroutines.Dispatchers
@@ -12,23 +14,37 @@ import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.util.Comparator
 
-open class Copy(name: String) : Task(name) {
+data class CopyInputs(
+    var sources: List<String>,
+    var destination: String?,
+    var includes: List<String>,
+    var excludes: List<String>
+) : InputSet()
+
+open class Copy(name: String) : Task<CopyInputs, NoOutputs>(name) {
     var sources: FilePaths = FilePaths(emptyList())
     var destination: String? = null
     var filter: FileFilter = FileFilter()
 
-    override suspend fun execute(context: ExecutionContext): ExecutionResult {
-        val dest = destination?.let { context.projectDir.resolve(it) }
-            ?: return ExecutionResult.Failure(IllegalArgumentException("Destination directory is not specified."))
+    override suspend fun buildInputs(context: ExecutionContext) = CopyInputs(
+        sources.paths.toList(), destination, filter.includes.toList(), filter.excludes.toList()
+    )
+
+    override fun buildOutputs() = NoOutputs()
+
+    override suspend fun execute(context: ExecutionContext, inputSet: CopyInputs): ExecutionResult<NoOutputs> {
+        val dest = inputSet.destination?.let { context.projectDir.resolve(it) }
+            ?: return failure(IllegalArgumentException("Destination directory is not specified."))
+        val filter = FileFilter(inputSet.includes, inputSet.excludes)
 
         try {
             withContext(Dispatchers.IO) {
                 Files.createDirectories(dest)
             }
-            for (sourceStr in sources.paths) {
+            for (sourceStr in inputSet.sources) {
                 val sourcePath = context.projectDir.resolve(sourceStr)
                 if (!Files.exists(sourcePath)) {
-                    return ExecutionResult.Failure(IllegalArgumentException("Source path '$sourceStr' does not exist."))
+                    return failure(IllegalArgumentException("Source path '$sourceStr' does not exist."))
                 }
 
                 if (Files.isDirectory(sourcePath)) {
@@ -52,30 +68,44 @@ open class Copy(name: String) : Task(name) {
                     }
                 }
             }
-            return ExecutionResult.Success
+            return success()
         } catch (t: Throwable) {
-            return ExecutionResult.Failure(t)
+            return failure(t)
         }
     }
 }
 
-open class Sync(name: String) : Task(name) {
+data class SyncInputs(
+    var sources: List<String>,
+    var destination: String?,
+    var includes: List<String>,
+    var excludes: List<String>
+) : InputSet()
+
+open class Sync(name: String) : Task<SyncInputs, NoOutputs>(name) {
     var sources: FilePaths = FilePaths(emptyList())
     var destination: String? = null
     var filter: FileFilter = FileFilter()
 
-    override suspend fun execute(context: ExecutionContext): ExecutionResult {
-        val dest = destination?.let { context.projectDir.resolve(it) }
-            ?: return ExecutionResult.Failure(IllegalArgumentException("Destination directory is not specified."))
+    override suspend fun buildInputs(context: ExecutionContext) = SyncInputs(
+        sources.paths.toList(), destination, filter.includes.toList(), filter.excludes.toList()
+    )
+
+    override fun buildOutputs() = NoOutputs()
+
+    override suspend fun execute(context: ExecutionContext, inputSet: SyncInputs): ExecutionResult<NoOutputs> {
+        val dest = inputSet.destination?.let { context.projectDir.resolve(it) }
+            ?: return failure(IllegalArgumentException("Destination directory is not specified."))
+        val filter = FileFilter(inputSet.includes, inputSet.excludes)
 
         try {
             Files.createDirectories(dest)
             val copiedTargets = mutableSetOf<Path>()
 
-            for (sourceStr in sources.paths) {
+            for (sourceStr in inputSet.sources) {
                 val sourcePath = context.projectDir.resolve(sourceStr)
                 if (!Files.exists(sourcePath)) {
-                    return ExecutionResult.Failure(IllegalArgumentException("Source path '$sourceStr' does not exist."))
+                    return failure(IllegalArgumentException("Source path '$sourceStr' does not exist."))
                 }
 
                 if (Files.isDirectory(sourcePath)) {
@@ -113,27 +143,32 @@ open class Sync(name: String) : Task(name) {
                     }
             }
 
-            return ExecutionResult.Success
+            return success()
         } catch (t: Throwable) {
-            return ExecutionResult.Failure(t)
+            return failure(t)
         }
     }
 }
 
-open class Move(name: String) : Task(name) {
+data class MoveInputs(var sources: List<String>, var destination: String?) : InputSet()
+
+open class Move(name: String) : Task<MoveInputs, NoOutputs>(name) {
     var sources: FilePaths = FilePaths(emptyList())
     var destination: String? = null
 
-    override suspend fun execute(context: ExecutionContext): ExecutionResult {
-        val dest = destination?.let { context.projectDir.resolve(it) }
-            ?: return ExecutionResult.Failure(IllegalArgumentException("Destination directory is not specified."))
+    override suspend fun buildInputs(context: ExecutionContext) = MoveInputs(sources.paths.toList(), destination)
+    override fun buildOutputs() = NoOutputs()
+
+    override suspend fun execute(context: ExecutionContext, inputSet: MoveInputs): ExecutionResult<NoOutputs> {
+        val dest = inputSet.destination?.let { context.projectDir.resolve(it) }
+            ?: return failure(IllegalArgumentException("Destination directory is not specified."))
 
         try {
             Files.createDirectories(dest)
-            for (sourceStr in sources.paths) {
+            for (sourceStr in inputSet.sources) {
                 val sourcePath = context.projectDir.resolve(sourceStr)
                 if (!Files.exists(sourcePath)) {
-                    return ExecutionResult.Failure(IllegalArgumentException("Source path '$sourceStr' does not exist."))
+                    return failure(IllegalArgumentException("Source path '$sourceStr' does not exist."))
                 }
 
                 if (Files.isDirectory(sourcePath)) {
@@ -156,19 +191,24 @@ open class Move(name: String) : Task(name) {
                     Files.move(sourcePath, target, StandardCopyOption.REPLACE_EXISTING)
                 }
             }
-            return ExecutionResult.Success
+            return success()
         } catch (t: Throwable) {
-            return ExecutionResult.Failure(t)
+            return failure(t)
         }
     }
 }
 
-open class Delete(name: String) : Task(name) {
+data class DeleteInputs(var files: List<String>) : InputSet()
+
+open class Delete(name: String) : Task<DeleteInputs, NoOutputs>(name) {
     var files: FilePaths = FilePaths(emptyList())
 
-    override suspend fun execute(context: ExecutionContext): ExecutionResult {
+    override suspend fun buildInputs(context: ExecutionContext) = DeleteInputs(files.paths.toList())
+    override fun buildOutputs() = NoOutputs()
+
+    override suspend fun execute(context: ExecutionContext, inputSet: DeleteInputs): ExecutionResult<NoOutputs> {
         try {
-            for (fileStr in files.paths) {
+            for (fileStr in inputSet.files) {
                 val path = context.projectDir.resolve(fileStr)
                 if (Files.exists(path)) {
                     if (Files.isDirectory(path)) {
@@ -180,9 +220,9 @@ open class Delete(name: String) : Task(name) {
                     }
                 }
             }
-            return ExecutionResult.Success
+            return success()
         } catch (t: Throwable) {
-            return ExecutionResult.Failure(t)
+            return failure(t)
         }
     }
 }

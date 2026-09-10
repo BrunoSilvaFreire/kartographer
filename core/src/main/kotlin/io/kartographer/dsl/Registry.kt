@@ -17,6 +17,8 @@ class NodeRegistry {
 
     /** Set by the `project { rootDirectory = ... }` DSL block. */
     var projectRoot: String? = null
+    val pipelineInputFiles = linkedSetOf<String>()
+    var projectDirectory: String? = null
 
     val nodes: Map<TaskId, Node>
         get() = nodesMap
@@ -24,6 +26,8 @@ class NodeRegistry {
     fun clear() {
         nodesMap.clear()
         projectRoot = null
+        pipelineInputFiles.clear()
+        projectDirectory = null
     }
 
     fun register(node: Node) {
@@ -48,7 +52,7 @@ class NodeRegistry {
         return newGroup
     }
 
-    fun <T : Task> create(clazz: Class<T>, name: String, configure: T.() -> Unit): T {
+    fun <T : Task<*, *>> create(clazz: Class<T>, name: String, configure: T.() -> Unit): T {
         val task = try {
             val constructor = clazz.getConstructor(String::class.java)
             constructor.newInstance(name)
@@ -105,11 +109,11 @@ object TaskRegistry {
 
     fun getOrRegisterGroup(name: String): Group = current.getOrRegisterGroup(name)
 
-    inline fun <reified T : Task> create(name: String, noinline configure: T.() -> Unit): T =
+    inline fun <reified T : Task<*, *>> create(name: String, noinline configure: T.() -> Unit): T =
         current.create(T::class.java, name, configure)
 }
 
-inline fun <reified T : Task> task(name: String, noinline configure: T.() -> Unit): T {
+inline fun <reified T : Task<*, *>> task(name: String, noinline configure: T.() -> Unit): T {
     return TaskRegistry.create(name, configure)
 }
 
@@ -137,4 +141,14 @@ class ProjectSpec {
 fun project(block: ProjectSpec.() -> Unit) {
     val spec = ProjectSpec()
     spec.block()
+}
+
+/** Declares a file read while evaluating the pipeline so daemon cache invalidation includes it. */
+fun pipelineInputFile(path: String): String {
+    val file = java.io.File(path).let { candidate ->
+        if (candidate.isAbsolute) candidate
+        else TaskRegistry.current.projectDirectory?.let { java.io.File(it, path) } ?: candidate
+    }.absoluteFile
+    TaskRegistry.current.pipelineInputFiles.add(file.path)
+    return file.path
 }

@@ -2,6 +2,8 @@ package io.kartographer.core.scheduler
 
 import io.kartographer.core.model.Task
 import io.kartographer.core.model.ExecutionContext
+import io.kartographer.core.model.OutputSet
+import io.kartographer.core.model.StoredOutputValue
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.nio.file.Files
@@ -10,23 +12,28 @@ import java.security.MessageDigest
 
 @Serializable
 data class TaskState(
+    val inputHash: String? = null,
     val properties: Map<String, String> = emptyMap(),
     val inputFiles: Map<String, String> = emptyMap(),
     val outputFiles: Map<String, String> = emptyMap(),
     val customProperties: Map<String, String> = emptyMap(),
-    val customFiles: Map<String, String> = emptyMap()
+    val customFiles: Map<String, String> = emptyMap(),
+    val outputs: Map<String, StoredOutputState> = emptyMap()
 )
+
+@Serializable
+data class StoredOutputState(val type: String, val value: String)
 
 object TaskStateStore {
     private val json = Json { prettyPrint = true }
 
-    fun getStateFile(context: ExecutionContext, task: Task): Path {
+    fun getStateFile(context: ExecutionContext, task: Task<*, *>): Path {
         // Replace spaces or special characters in task names to create valid file paths
-        val safeName = task.name.replace(Regex("[^a-zA-Z0-9-_]"), "_")
+        val safeName = (context.invocationId ?: task.name).replace(Regex("[^a-zA-Z0-9-_]"), "_")
         return context.projectDir.resolve(".kartographer/state/$safeName.json")
     }
 
-    fun loadState(context: ExecutionContext, task: Task): TaskState? {
+    fun loadState(context: ExecutionContext, task: Task<*, *>): TaskState? {
         val file = getStateFile(context, task)
         if (!Files.exists(file)) return null
         return try {
@@ -37,12 +44,12 @@ object TaskStateStore {
         }
     }
 
-    fun saveState(context: ExecutionContext, task: Task) {
+    suspend fun saveState(context: ExecutionContext, task: Task<*, *>, outputs: OutputSet? = null) {
         val file = getStateFile(context, task)
         Files.createDirectories(file.parent)
 
         val properties = task.registeredProperties.mapIndexed { index, prop ->
-            "prop-$index" to if (prop.isPresent()) prop.get().toString() else ""
+            "prop-$index" to prop.renderForState()
         }.toMap()
 
         val inputFiles = mutableMapOf<String, String>()
@@ -56,11 +63,11 @@ object TaskStateStore {
         }
 
         val outputFiles = mutableMapOf<String, String>()
-        for (f in task.outputs.files) {
+        for (f in task.trackedOutputs.files) {
             val path = context.projectDir.resolve(f)
             outputFiles[f] = calculateHash(path)
         }
-        for (d in task.outputs.dirs) {
+        for (d in task.trackedOutputs.dirs) {
             val path = context.projectDir.resolve(d)
             outputFiles[d] = calculateHash(path)
         }
@@ -73,9 +80,22 @@ object TaskStateStore {
             calculateHash(context.projectDir.resolve(f))
         }
 
-        val state = TaskState(properties, inputFiles, outputFiles, customProperties, customFiles)
+        val storedOutputs = outputs?.values().orEmpty().mapNotNull { (name, output) ->
+            output.stored()?.let { name to StoredOutputState(it.type, it.value) }
+        }.toMap()
+        val state = TaskState(
+            context.inputHash, properties, inputFiles, outputFiles,
+            customProperties, customFiles, storedOutputs
+        )
         val content = json.encodeToString(TaskState.serializer(), state)
         Files.writeString(file, content)
+    }
+
+    fun restoreOutputs(context: ExecutionContext, task: Task<*, *>, outputs: OutputSet) {
+        val values = loadState(context, task)?.outputs.orEmpty().mapValues { (_, stored) ->
+            StoredOutputValue(stored.type, stored.value)
+        }
+        outputs.restore(values)
     }
 
     fun calculateHash(path: Path): String {

@@ -18,7 +18,7 @@ class ExecSpecValidationStepDefinitions {
     private val capturedCommands = mutableListOf<String>()
     private val capturedEnv = mutableMapOf<String, String>()
     private var capturedElevation: Boolean = false
-    private var executionResult: ExecutionResult? = null
+    private var executionResult: ExecutionResult<*>? = null
     private val contextEnv = mutableMapOf<String, String>()
     private var projectDir: Path? = null
 
@@ -122,13 +122,13 @@ class ExecSpecValidationStepDefinitions {
 
     @Then("the task execution should succeed")
     fun then_task_succeeds() {
-        assertTrue(executionResult is ExecutionResult.Success, "Expected Success but got $executionResult")
+        assertTrue(executionResult is ExecutionResult.Success<*>, "Expected Success but got $executionResult")
     }
 
     @Then("the custom task execution should fail with RuntimeException")
     fun then_custom_task_fails_runtime() {
         val res = executionResult
-        assertTrue(res is ExecutionResult.Failure, "Expected failure but got $res")
+        assertTrue(res is ExecutionResult.Failure<*>, "Expected failure but got $res")
         assertTrue(res.error is RuntimeException, "Expected RuntimeException but got ${res.error}")
         assertEquals("Simulated exception", res.error.message)
     }

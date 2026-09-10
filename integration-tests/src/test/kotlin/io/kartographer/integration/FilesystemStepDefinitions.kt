@@ -15,7 +15,7 @@ import kotlin.test.assertTrue
 class FilesystemStepDefinitions {
     private var projectDir: Path? = null
     private val tasks = mutableMapOf<TaskId, Node>()
-    private var executionResult: ExecutionResult? = null
+    private var executionResult: ExecutionResult<*>? = null
 
     @Given("a temporary directory")
     fun given_temp_dir() {
@@ -38,7 +38,7 @@ class FilesystemStepDefinitions {
 
     @When("we execute the filesystem task {string}")
     fun when_execute_fs_task(name: String) = runBlocking {
-        val task = tasks[TaskId(name)] as? Task ?: throw IllegalArgumentException("Task $name not found")
+        val task = tasks[TaskId(name)] as? Task<*, *> ?: throw IllegalArgumentException("Task $name not found")
         val dir = projectDir ?: throw IllegalStateException("Temp dir not initialized")
         val context = ExecutionContext(
             projectDir = dir,
@@ -65,13 +65,13 @@ class FilesystemStepDefinitions {
     @Then("the filesystem task execution should fail with IllegalArgumentException")
     fun then_fs_fails_illegal_arg() {
         val res = executionResult
-        assertTrue(res is ExecutionResult.Failure, "Expected failure but got $res")
+        assertTrue(res is ExecutionResult.Failure<*>, "Expected failure but got $res")
         assertTrue(res.error is IllegalArgumentException, "Expected IllegalArgumentException but got ${res.error}")
     }
 
     @Then("the filesystem pipeline execution should succeed")
     fun then_fs_pipeline_succeeds() {
-        assertTrue(executionResult is ExecutionResult.Success, "Expected Success but got $executionResult")
+        assertTrue(executionResult is ExecutionResult.Success<*>, "Expected Success but got $executionResult")
     }
 
     @Given("a write-protected directory {string}")
@@ -86,6 +86,6 @@ class FilesystemStepDefinitions {
     fun then_fs_task_fails() {
         val res = executionResult
         projectDir?.toFile()?.walk()?.forEach { it.setWritable(true) }
-        assertTrue(res is ExecutionResult.Failure, "Expected failure but got $res")
+        assertTrue(res is ExecutionResult.Failure<*>, "Expected failure but got $res")
     }
 }

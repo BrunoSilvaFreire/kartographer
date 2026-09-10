@@ -118,7 +118,7 @@ class KartographerTest {
     fun testDSLBuildsExpectedTaskGraph() {
         val first = task<DefaultTask>("first") {
             inputs.file("src/main.kt")
-            outputs.dir("build/out")
+            trackedOutputs.dir("build/out")
         }
 
         val second = task<DefaultTask>("second") {
@@ -133,7 +133,7 @@ class KartographerTest {
         assertTrue(second.dependencyNames.contains("non-existent-yet"))
 
         assertTrue(first.inputs.files.contains("src/main.kt"))
-        assertTrue(first.outputs.dirs.contains("build/out"))
+        assertTrue(first.trackedOutputs.dirs.contains("build/out"))
     }
 
     @Test

@@ -50,6 +50,10 @@ class PlainRenderer : Renderer {
                 is ExecutionEvent.TaskOutput -> {
                     log("[${event.task.name}] ${event.line}", isError = event.isError)
                 }
+                is ExecutionEvent.TaskOutputProduced -> {
+                    val displayVal = if (event.secret) io.kartographer.core.model.SECRET_MASK else event.value
+                    log("[${event.task.name}] Output [${event.name}]: $displayVal")
+                }
                 is ExecutionEvent.TaskCompleted -> {
                     val status = when (val res = event.result) {
                         is ExecutionResult.Success -> {

@@ -7,29 +7,38 @@ import com.github.ajalt.clikt.core.subcommands
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.arguments.optional
 import com.github.ajalt.clikt.parameters.options.associate
-import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.clikt.parameters.types.choice
 import io.kartographer.cli.render.MosaicRenderer
 import io.kartographer.cli.render.PlainRenderer
+import io.kartographer.cli.render.PromptAnswer
+import io.kartographer.cli.render.PromptRenderer
+import io.kartographer.cli.render.PromptRequest
 import io.kartographer.cli.render.Renderer
 import io.kartographer.core.model.ExecutionResult
 import io.kartographer.daemon.proto.DescribeProjectResponse
 import io.kartographer.daemon.proto.NodeInfo
 import io.kartographer.daemon.proto.ProjectContext
 import io.kartographer.daemon.proto.PromptKind
+import io.kartographer.daemon.proto.QueryRunsResponse
 import io.kartographer.daemon.proto.RunClientMessage
+import io.kartographer.daemon.proto.RunInfo
 import io.kartographer.daemon.proto.RunServerMessage
 import io.kartographer.daemon.proto.describeProjectRequest
 import io.kartographer.daemon.proto.projectContext
 import io.kartographer.daemon.proto.promptResponse
+import io.kartographer.daemon.proto.queryRunsRequest
 import io.kartographer.daemon.proto.runCancel
 import io.kartographer.daemon.proto.runClientMessage
 import io.kartographer.daemon.proto.runStart
+import io.kartographer.daemon.proto.stdinData
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.selects.select
+import java.io.InputStream
 import java.nio.file.Paths
 
 /**
@@ -153,7 +162,7 @@ class RunCommand : CliktCommand(name = "run", help = "Run a task and all its dep
     private val taskHelp by option("--task-help", hidden = true).flag()
     private val taskName by argument(help = "The name of the task to run").optional()
     private val properties by option("-P").associate()
-    private val ui by option("--ui", help = "Renderer to use (auto, tui, plain)").default("auto")
+    private val ui by option("--ui", help = "Renderer to use for this run").choice(*UI_METHODS.toTypedArray())
 
     override fun run() {
         if (taskHelp && taskName == null) {
@@ -209,6 +218,8 @@ class RunCommand : CliktCommand(name = "run", help = "Run a task and all its dep
         }
     }
 
+    private val isPromptActive = java.util.concurrent.atomic.AtomicBoolean(false)
+
     private fun execute() {
         val connection = try {
             DaemonConnection.connect()
@@ -217,10 +228,12 @@ class RunCommand : CliktCommand(name = "run", help = "Run a task and all its dep
             throw ProgramResult(1)
         }
 
-        val renderer: Renderer = when (ui) {
+        val resolvedUi = resolveUi(ui, KartoPreferences().ui, System.console() != null)
+        val renderer: Renderer = when (resolvedUi) {
             "tui" -> MosaicRenderer()
-            else -> PlainRenderer() // Defaulting to PlainRenderer as MVP TUI for now
+            else -> PlainRenderer()
         }
+        val usesTui = resolvedUi == "tui"
 
         val stream = connection.startRun(
             runClientMessage {
@@ -240,6 +253,37 @@ class RunCommand : CliktCommand(name = "run", help = "Run a task and all its dep
         }
         Runtime.getRuntime().addShutdownHook(cancelHook)
 
+        // Forward interactive stdin from the user's terminal to the daemon. The TUI owns the
+        // terminal itself (Mosaic puts it in raw mode and consumes keystrokes), so this only
+        // runs for the plain renderer.
+        val inputThread = if (usesTui) {
+            null
+        } else {
+            Thread({
+                val buffer = ByteArray(1024)
+                try {
+                    while (!Thread.currentThread().isInterrupted) {
+                        if (isPromptActive.get()) {
+                            Thread.sleep(50)
+                            continue
+                        }
+                        val read = readAvailableInput(System.`in`, buffer)
+                        if (read == 0) {
+                            Thread.sleep(25)
+                            continue
+                        }
+                        if (read < 0) break
+                        if (isPromptActive.get()) continue
+                        val text = String(buffer, 0, read)
+                        runCatching {
+                            stream.send(runClientMessage { stdinData = stdinData { data = text } })
+                        }
+                    }
+                } catch (_: Exception) {}
+            }, "karto-cli-stdin").apply { isDaemon = true }
+        }
+        inputThread?.start()
+
         var failureExitCode: Int? = null
         runBlocking {
             val renderJob = launch(Dispatchers.Default) {
@@ -247,48 +291,91 @@ class RunCommand : CliktCommand(name = "run", help = "Run a task and all its dep
                     renderer.render()
                 } catch (e: Exception) {
                     System.err.println("Renderer crashed: ${e.message}")
+                    e.printStackTrace(System.err)
                 }
             }
 
             try {
-                // Reading blocks on the socket, so it gets a thread that is allowed to block
-                // while the renderer keeps draining events on another.
-                withContext(Dispatchers.IO) {
-                    while (true) {
-                        val message = stream.receive() ?: break
-                        when (message.messageCase) {
-                            RunServerMessage.MessageCase.PROMPT_REQUESTED -> {
-                                val answer = answerPrompt(message)
-                                stream.send(
-                                    runClientMessage {
-                                        promptResponse = promptResponse {
-                                            requestId = message.promptRequested.requestId
-                                            value = answer
-                                        }
-                                    }
-                                )
-                            }
-                            RunServerMessage.MessageCase.ERROR -> {
-                                echo("Error: ${message.error.message}", err = true)
-                                failureExitCode = message.error.exitCode.takeIf { it != 0 } ?: 1
-                                return@withContext
-                            }
-                            RunServerMessage.MessageCase.PIPELINE_COMPLETED -> {
-                                RemoteEvents.toExecutionEvent(message)?.let { renderer.onEvent(it) }
-                                val result = RemoteEvents.toResult(
-                                    message.pipelineCompleted.status,
-                                    message.pipelineCompleted.errorMessage,
-                                    message.pipelineCompleted.exitCode
-                                )
-                                if (result is ExecutionResult.Failure) {
-                                    failureExitCode = result.exitCode ?: 1
-                                }
-                                return@withContext
-                            }
-                            else -> RemoteEvents.toExecutionEvent(message)?.let { renderer.onEvent(it) }
+                // Reading blocks on the socket, so it gets its own thread that is allowed to
+                // block, while the loop below selects between incoming messages and the renderer.
+                val incoming = Channel<RunServerMessage>(Channel.UNLIMITED)
+                val readerJob = launch(Dispatchers.IO) {
+                    try {
+                        while (true) {
+                            val message = try {
+                                stream.receive()
+                            } catch (e: Exception) {
+                                break
+                            } ?: break
+                            incoming.send(message)
                         }
+                    } finally {
+                        incoming.close()
                     }
                 }
+
+                while (true) {
+                    // The TUI (Mosaic) puts the terminal in raw mode, which turns Ctrl-C into a
+                    // key event rather than a SIGINT, so the shutdown hook below never fires.
+                    // The renderer finishing on its own while the run is still streaming is that
+                    // interrupt: unwind the run instead of leaving it detached.
+                    val message = select<RunServerMessage?> {
+                        incoming.onReceiveCatching { it.getOrNull() }
+                        renderJob.onJoin { null }
+                    }
+                    if (message == null) {
+                        if (renderJob.isCompleted) {
+                            runCatching { stream.send(runClientMessage { cancel = runCancel { } }) }
+                        }
+                        break
+                    }
+                    when (message.messageCase) {
+                        RunServerMessage.MessageCase.PROMPT_REQUESTED -> {
+                            val request = message.promptRequested
+                            val answer = if (renderer is PromptRenderer) {
+                                renderer.onPromptRequested(
+                                    PromptRequest(
+                                        requestId = request.requestId,
+                                        task = request.task,
+                                        message = request.message,
+                                        isSecret = request.secret,
+                                        elevatedTasks = request.elevatedTasksList
+                                    )
+                                )
+                                renderer.promptAnswers.receive().value
+                            } else {
+                                answerPrompt(message)
+                            }
+                            stream.send(
+                                runClientMessage {
+                                    promptResponse = promptResponse {
+                                        requestId = request.requestId
+                                        value = answer
+                                    }
+                                }
+                            )
+                        }
+                        RunServerMessage.MessageCase.ERROR -> {
+                            echo("Error: ${message.error.message}", err = true)
+                            failureExitCode = message.error.exitCode.takeIf { it != 0 } ?: 1
+                            break
+                        }
+                        RunServerMessage.MessageCase.PIPELINE_COMPLETED -> {
+                            RemoteEvents.toExecutionEvent(message)?.let { renderer.onEvent(it) }
+                            val result = RemoteEvents.toResult(
+                                message.pipelineCompleted.status,
+                                message.pipelineCompleted.errorMessage,
+                                message.pipelineCompleted.exitCode
+                            )
+                            if (result is ExecutionResult.Failure<*>) {
+                                failureExitCode = result.exitCode ?: 1
+                            }
+                            break
+                        }
+                        else -> RemoteEvents.toExecutionEvent(message)?.let { renderer.onEvent(it) }
+                    }
+                }
+                readerJob.cancel()
             } finally {
                 renderer.events.close()
                 renderJob.join()
@@ -302,36 +389,193 @@ class RunCommand : CliktCommand(name = "run", help = "Run a task and all its dep
 
     /** Prompts run on the real terminal here; only the answer crosses back to the daemon. */
     private fun answerPrompt(message: RunServerMessage): String {
-        val request = message.promptRequested
+        isPromptActive.set(true)
+        try {
+            val request = message.promptRequested
 
-        if (request.kind == PromptKind.PROMPT_SUDO_PASSWORD) {
-            println("================================================================")
-            println("🔒 PRIVILEGE ESCALATION REQUIRED")
-            println("----------------------------------------------------------------")
-            println("The following tasks require Sudo privileges to execute:")
-            request.elevatedTasksList.forEach { println("  - $it") }
-            println()
-        }
-
-        val console = System.console()
-        val answer = when {
-            console != null && request.secret ->
-                String(console.readPassword(request.message) ?: CharArray(0))
-            console != null -> {
-                print(request.message)
-                console.readLine() ?: ""
+            if (request.kind == PromptKind.PROMPT_SUDO_PASSWORD) {
+                println("================================================================")
+                println("🔒 PRIVILEGE ESCALATION REQUIRED")
+                println("----------------------------------------------------------------")
+                println("The following tasks require Sudo privileges to execute:")
+                request.elevatedTasksList.forEach { println("  - $it") }
+                println()
             }
-            else -> {
-                print(request.message)
-                System.out.flush()
-                readlnOrNull() ?: ""
+
+            val console = System.console()
+            val answer = when {
+                console != null && request.secret ->
+                    String(console.readPassword(request.message) ?: CharArray(0))
+                console != null -> {
+                    print(request.message)
+                    console.readLine() ?: ""
+                }
+                else -> {
+                    print(request.message)
+                    System.out.flush()
+                    readlnOrNull() ?: ""
+                }
             }
+
+            if (request.kind == PromptKind.PROMPT_SUDO_PASSWORD) {
+                println("================================================================\n")
+            }
+            return answer
+        } finally {
+            isPromptActive.set(false)
+        }
+    }
+}
+
+internal fun readAvailableInput(input: InputStream, buffer: ByteArray): Int {
+    val available = input.available()
+    return if (available == 0) 0 else input.read(buffer, 0, minOf(available, buffer.size))
+}
+
+internal fun resolveUi(requested: String?, preferred: String, interactive: Boolean): String =
+    when (val selected = requested ?: preferred) {
+        "tui", "plain" -> selected
+        else -> if (interactive) "tui" else "plain"
+    }
+
+class PsCommand : CliktCommand(name = "ps", help = "List active and recent pipeline runs, tasks, and outputs") {
+    private val all by option("-a", "--all", help = "Show all recent runs including completed and failed").flag(default = false)
+    private val json by option("--json", help = "Output details in JSON format").flag(default = false)
+    private val filterProjectDir by option("-d", "--project-dir", help = "Filter by project directory")
+
+    override fun run() {
+        val response = withDaemon { connection ->
+            val request = queryRunsRequest {
+                activeOnly = !all
+                filterProjectDir?.let { projectDir = it }
+            }
+            connection.queryRuns(request)
         }
 
-        if (request.kind == PromptKind.PROMPT_SUDO_PASSWORD) {
-            println("================================================================\n")
+        if (json) {
+            echo(formatJson(response))
+            return
         }
-        return answer
+
+        if (response.runsList.isEmpty()) {
+            if (all) {
+                echo("No recent runs found.")
+            } else {
+                echo("No active runs found. Use 'karto ps -a' to see completed runs.")
+            }
+            return
+        }
+
+        echoTable(response.runsList)
+    }
+
+    fun echoTable(runs: List<RunInfo>) {
+        val maxRunIdLen = maxOf(6, runs.maxOf { it.runId.length })
+        val maxTargetLen = maxOf(6, runs.maxOf { it.targetTask.length })
+        val maxStateLen = maxOf(6, runs.maxOf { it.state.length })
+
+        echo(
+            "${"RUN ID".padEnd(maxRunIdLen)}   ${"TARGET".padEnd(maxTargetLen)}   " +
+                "${"STATUS".padEnd(maxStateLen)}   TASKS & OUTPUTS"
+        )
+        echo("-".repeat(maxRunIdLen + maxTargetLen + maxStateLen + 40))
+
+        for (run in runs) {
+            val taskSummaries = run.tasksList.joinToString("; ") { task ->
+                val outs = if (task.outputsMap.isNotEmpty()) {
+                    " [${task.outputsMap.entries.joinToString(", ") { "${it.key}=${it.value}" }}]"
+                } else ""
+                "${task.taskName} (${task.state})$outs"
+            }
+            echo(
+                "${run.runId.padEnd(maxRunIdLen)}   ${run.targetTask.padEnd(maxTargetLen)}   " +
+                    "${run.state.padEnd(maxStateLen)}   $taskSummaries"
+            )
+        }
+    }
+
+    fun formatJson(response: QueryRunsResponse): String {
+        val jsonRuns = response.runsList.joinToString(",\n") { run ->
+            val tasksJson = run.tasksList.joinToString(",\n") { task ->
+                val outputsJson = task.outputsMap.entries.joinToString(", ") { (k, v) ->
+                    "\"${escapeJson(k)}\": \"${escapeJson(v)}\""
+                }
+                val errJson = if (task.errorMessage.isNotBlank()) ",\n      \"error\": \"${escapeJson(task.errorMessage)}\"" else ""
+                """
+                {
+                  "task": "${escapeJson(task.taskName)}",
+                  "state": "${escapeJson(task.state)}",
+                  "startedAt": ${task.startedAtMillis},
+                  "completedAt": ${task.completedAtMillis},
+                  "outputs": { $outputsJson }$errJson
+                }
+                """.trimIndent()
+            }
+
+            """
+            {
+              "runId": "${escapeJson(run.runId)}",
+              "projectDir": "${escapeJson(run.projectDir)}",
+              "target": "${escapeJson(run.targetTask)}",
+              "state": "${escapeJson(run.state)}",
+              "startedAt": ${run.startedAtMillis},
+              "completedAt": ${run.completedAtMillis},
+              "tasks": [
+            ${tasksJson.prependIndent("    ")}
+              ]
+            }
+            """.trimIndent()
+        }
+
+        return "[\n${jsonRuns.prependIndent("  ")}\n]"
+    }
+
+    private fun escapeJson(str: String): String =
+        str.replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\b", "\\b")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            .replace("\t", "\\t")
+}
+
+class StatusCommand : CliktCommand(name = "status", help = "Alias for 'ps': list active and recent runs") {
+    private val all by option("-a", "--all", help = "Show all recent runs including completed and failed").flag(default = false)
+    private val json by option("--json", help = "Output details in JSON format").flag(default = false)
+    private val filterProjectDir by option("-d", "--project-dir", help = "Filter by project directory")
+
+    override fun run() {
+        val ps = PsCommand()
+        val response = withDaemon { connection ->
+            val request = queryRunsRequest {
+                activeOnly = !all
+                filterProjectDir?.let { projectDir = it }
+            }
+            connection.queryRuns(request)
+        }
+        if (json) {
+            echo(ps.formatJson(response))
+            return
+        }
+        if (response.runsList.isEmpty()) {
+            if (all) {
+                echo("No recent runs found.")
+            } else {
+                echo("No active runs found. Use 'karto status -a' to see completed runs.")
+            }
+            return
+        }
+        ps.echoTable(response.runsList)
+    }
+}
+
+class PreferencesCommand : CliktCommand(name = "preferences", help = "View or change Kartographer preferences") {
+    private val ui by option("--ui", help = "Default renderer").choice(*UI_METHODS.toTypedArray())
+
+    override fun run() {
+        val preferences = KartoPreferences()
+        ui?.let { preferences.ui = it }
+        echo("ui=${preferences.ui}")
     }
 }
 
@@ -342,10 +586,26 @@ fun main(args: Array<String>) {
         CustomAutocomplete.handle(completeEnv, args)
     }
 
-    // Rewrite args to support direct task properties like --version
+    val newArgs = rewriteArgs(args.toList())
+    Timing.mark("args rewritten")
+    KartographerCommand()
+        .subcommands(TasksCommand(), GraphCommand(), RunCommand(), PsCommand(), StatusCommand(), PreferencesCommand())
+        .main(newArgs)
+    Timing.mark("command finished")
+}
+
+/**
+ * Options that take a value and must never be rewritten into `-P` task properties.
+ *
+ * `karto run` also accepts arbitrary `--property value` flags (e.g. `--version 1.1.0-rc1`) that
+ * map onto task properties. This function distinguishes the two: known CLI options are passed
+ * through verbatim, while anything else that looks like a long flag becomes a `-P name=value`.
+ */
+private val VALUE_OPTIONS = setOf("--ui", "--project-dir", "--pipeline")
+
+internal fun rewriteArgs(args: List<String>): List<String> {
     val newArgs = mutableListOf<String>()
     var i = 0
-    val knownOptions = setOf("--ui", "-d", "--project-dir", "-p", "--pipeline", "--help", "-h")
     val hasRun = args.contains("run")
 
     // Check if a task name is present for run
@@ -353,28 +613,24 @@ fun main(args: Array<String>) {
 
     while (i < args.size) {
         val arg = args[i]
-        if (arg.startsWith("--") && arg !in knownOptions && hasRun) {
-            val propName = arg.substring(2)
-            newArgs.add("-P")
-            if (propName.contains('=')) {
-                // --name=value form: already a complete assignment.
-                newArgs.add(propName)
-            } else if (i + 1 < args.size && !args[i + 1].startsWith("-")) {
-                newArgs.add("$propName=${args[++i]}")
-            } else {
-                newArgs.add("$propName=true")
+        when {
+            VALUE_OPTIONS.any { arg == it || arg.startsWith("$it=") } -> newArgs.add(arg)
+            (arg == "--help" || arg == "-h") && hasRun && taskArg != null -> newArgs.add("--task-help")
+            arg.startsWith("--") && hasRun -> {
+                val propName = arg.substring(2)
+                newArgs.add("-P")
+                if (propName.contains('=')) {
+                    // --name=value form: already a complete assignment.
+                    newArgs.add(propName)
+                } else if (i + 1 < args.size && !args[i + 1].startsWith("-")) {
+                    newArgs.add("$propName=${args[++i]}")
+                } else {
+                    newArgs.add("$propName=true")
+                }
             }
-        } else if ((arg == "--help" || arg == "-h") && hasRun && taskArg != null) {
-            newArgs.add("--task-help")
-        } else {
-            newArgs.add(arg)
+            else -> newArgs.add(arg)
         }
         i++
     }
-
-    Timing.mark("args rewritten")
-    KartographerCommand()
-        .subcommands(TasksCommand(), GraphCommand(), RunCommand())
-        .main(newArgs)
-    Timing.mark("command finished")
+    return newArgs
 }

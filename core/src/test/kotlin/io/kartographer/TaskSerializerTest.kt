@@ -4,18 +4,19 @@ import io.kartographer.core.*
 import io.kartographer.core.model.*
 import io.kartographer.core.plugins.TaskSerializer
 import org.junit.jupiter.api.Assertions.*
+import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
 
-class SerializerTestTask(name: String) : Task(name) {
+class SerializerTestTask(name: String) : Task<NoInputs, NoOutputs>(name) {
     var stringProp: String = ""
     var intProp: Int = 0
     var boolProp: Boolean = false
     val stringListProp = mutableListOf<String>()
     val wrappedProp: Property<String> = property()
 
-    override suspend fun execute(context: ExecutionContext): ExecutionResult {
-        return ExecutionResult.Success
-    }
+    override suspend fun buildInputs(context: ExecutionContext) = NoInputs()
+    override fun buildOutputs() = NoOutputs()
+    override suspend fun execute(context: ExecutionContext, inputSet: NoInputs) = success()
 }
 
 class TaskSerializerTest {
@@ -32,7 +33,7 @@ class TaskSerializerTest {
         }
 
         // 2. Act: Serialize
-        val serialized = TaskSerializer.serializeProperties(task)
+        val serialized = runBlocking { TaskSerializer.serializeProperties(task) }
 
         // 3. Assert serialized values
         assertEquals("Hello World", serialized["stringProp"])
@@ -52,6 +53,6 @@ class TaskSerializerTest {
         assertEquals(42, cleanTask.intProp)
         assertTrue(cleanTask.boolProp)
         assertEquals(listOf("apple", "banana", "cherry"), cleanTask.stringListProp)
-        assertEquals("wrapped-value", cleanTask.wrappedProp.get())
+        assertEquals("wrapped-value", runBlocking { cleanTask.wrappedProp.get() })
     }
 }

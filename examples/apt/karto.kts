@@ -15,7 +15,8 @@ task<AptInstall>("apt-inst") {
 }
 
 task<AptInstall>("apt-inst-provider") {
-    install(pkg.outputDeb)
+    val packageOutput = dependsOn(pkg)
+    install(packageOutput.outputDeb)
 }
 
 task<AptInstall>("apt-inst-empty") {

@@ -1,8 +1,10 @@
 package io.kartographer.tasks.containers
 
-import io.kartographer.tasks.DefaultTask
 import io.kartographer.core.model.ExecutionContext
 import io.kartographer.core.model.ExecutionResult
+import io.kartographer.core.model.InputSet
+import io.kartographer.core.model.OutputSet
+import io.kartographer.core.model.Task
 import io.kartographer.core.model.executeBash
 import java.time.Instant
 import java.nio.file.Path
@@ -18,34 +20,63 @@ enum class ContainerClient(val command: String, val rootful: Boolean) {
 /**
  * Builds a container image from a Containerfile/Dockerfile.
  */
-open class ContainerBuild(name: String) : DefaultTask(name) {
+data class ContainerBuildInputs(
+    var imageName: String,
+    var containerfile: String,
+    var context: String,
+    var platforms: List<String>,
+    var containerClient: ContainerClient,
+    var version: String?,
+    var namespace: String?,
+    var buildArgs: Map<String, String>
+) : InputSet()
+
+class ContainerBuildOutputs : OutputSet() {
+    val imageRef = output<String>("image")
+}
+
+open class ContainerBuild(name: String) : Task<ContainerBuildInputs, ContainerBuildOutputs>(name) {
     val imageName = property<String>()
     val containerfile = property<String>()
     val context = property<String> { set(".") }
-    val platform = property<String>()
+    val platforms = property<List<String>> { set(emptyList()) }
     val containerClient = property<ContainerClient> { set(ContainerClient.DOCKER) }
     val version = property<String>().withCLI("version", "Override the build version")
     val namespace = property<String>()
     val buildArgs = property<Map<String, String>>()
 
-    override val requiresElevation: Boolean get() = containerClient.get().rootful
-
-    // Output property (useful for wiring into Push tasks)
-    val imageRef = property<String>().asOutput("image")
+    // Elevation is decided while the plan is built, before any provider can
+    // resolve, so only a directly-set client can drive it.
+    override val requiresElevation: Boolean
+        get() = containerClient.directOrNull()?.rootful ?: false
 
     init {
         // The image store is external to Kartographer's state directory and may
         // be changed or removed independently. Always rebuild when requested.
-        upToDateWhen { _, _ -> false }
+        alwaysRun()
     }
 
-    override suspend fun execute(context: ExecutionContext): ExecutionResult {
-        val clientCmd = containerClient.get().command
-        val fullImageName = if (version.isPresent()) "${imageName.get()}:${version.get()}" else imageName.get()
-        val configuredBuildArgs = if (buildArgs.isPresent()) buildArgs.get() else emptyMap()
+    override suspend fun buildInputs(context: ExecutionContext): ContainerBuildInputs {
+        val effectiveVersion = version.orNull()
+        val effectiveBuildArgs = buildArgs.orNull()?.toMutableMap() ?: linkedMapOf()
+        if (effectiveVersion != null && "PROJECT_VERSION" in effectiveBuildArgs) {
+            effectiveBuildArgs["PROJECT_VERSION"] = effectiveVersion
+        }
+        return ContainerBuildInputs(
+            imageName.get(), containerfile.get(), this.context.get(), platforms.get(),
+            containerClient.get(), effectiveVersion, namespace.orNull(), effectiveBuildArgs
+        )
+    }
+
+    override fun buildOutputs() = ContainerBuildOutputs()
+
+    override suspend fun execute(context: ExecutionContext, inputSet: ContainerBuildInputs): ExecutionResult<ContainerBuildOutputs> {
+        val clientCmd = inputSet.containerClient.command
+        val fullImageName = inputSet.version?.let { "${inputSet.imageName}:$it" } ?: inputSet.imageName
+        val configuredBuildArgs = inputSet.buildArgs
         val effectiveBuildArgs = linkedMapOf<String, String>()
-        if (version.isPresent() && "VERSION" !in configuredBuildArgs) {
-            effectiveBuildArgs["VERSION"] = version.get()
+        if (inputSet.version != null && "VERSION" !in configuredBuildArgs) {
+            effectiveBuildArgs["VERSION"] = inputSet.version!!
         }
         val sourceRevision = configuredBuildArgs["GIT_COMMIT"]
             ?: context.environment["GIT_COMMIT"]
@@ -61,19 +92,20 @@ open class ContainerBuild(name: String) : DefaultTask(name) {
         }
         effectiveBuildArgs.putAll(configuredBuildArgs)
 
-        imageRef.set(fullImageName)
-        return context.executeBash {
-            requiresElevation = containerClient.get().rootful
+        val commandResult = context.executeBash {
+            requiresElevation = inputSet.containerClient.rootful
             command(clientCmd)
-            if (namespace.isPresent() && clientCmd.contains("nerdctl")) {
-                args("--namespace", namespace.get())
+            if (inputSet.namespace != null && clientCmd.contains("nerdctl")) {
+                args("--namespace", inputSet.namespace!!)
             }
-            args("build", "-t", fullImageName, "-f", containerfile.get())
+            args("build", "-t", fullImageName, "-f", inputSet.containerfile)
             effectiveBuildArgs.forEach { (k, v) -> args("--build-arg", "$k=$v") }
-            if (platform.isPresent()) {
-                args("--platform", platform.get())
-            }
-            args(this@ContainerBuild.context.get())
+            inputSet.platforms.forEach { args("--platform", it) }
+            args(inputSet.context)
+        }
+        return when (commandResult) {
+            is ExecutionResult.Failure -> failure(commandResult.error, commandResult.exitCode)
+            else -> success { imageRef.set(fullImageName) }
         }
     }
 }
@@ -81,52 +113,76 @@ open class ContainerBuild(name: String) : DefaultTask(name) {
 /**
  * Pushes a container image to a registry.
  */
-open class ContainerPush(name: String) : DefaultTask(name) {
+data class ContainerPushInputs(
+    var imageRef: String,
+    var registry: String,
+    var containerClient: ContainerClient,
+    var namespace: String?
+) : InputSet()
+
+class ContainerPushOutputs : OutputSet() {
+    val pushedRef = output<String>("pushed")
+}
+
+open class ContainerPush(name: String) : Task<ContainerPushInputs, ContainerPushOutputs>(name) {
     val imageRef = property<String>()
     val registry = property<String>()
     val containerClient = property<ContainerClient> { set(ContainerClient.DOCKER) }
     val namespace = property<String>()
+    // Control-only: this task's own execution pushes whatever `imageRef` the
+    // build produced. The version is forwarded to the build as a parametrized
+    // dependency (see containerMatrix), so `push/<image> --version=X` tags the
+    // image X instead of the matrix-wide RELEASE_TAG.
+    val version = property<String>().withCLI("version", "Override the image version to build and push")
 
-    // Where the image actually landed, registry prefix included.
-    val pushedRef = property<String>().asOutput("pushed")
-
-    override val requiresElevation: Boolean get() = containerClient.get().rootful
+    // Elevation is decided while the plan is built, before any provider can
+    // resolve, so only a directly-set client can drive it.
+    override val requiresElevation: Boolean
+        get() = containerClient.directOrNull()?.rootful ?: false
 
     init {
         // A registry tag is external mutable state. In particular, rerunning a
         // release push must repair a missing or reduced multi-platform index.
-        upToDateWhen { _, _ -> false }
+        alwaysRun()
     }
 
-    override suspend fun execute(context: ExecutionContext): ExecutionResult {
-        val clientCmd = containerClient.get().command
-        val registryStr = registry.get()
-        val fullRef = if (registryStr.isEmpty()) imageRef.get() else "$registryStr/${imageRef.get()}"
-        pushedRef.set(fullRef)
+    override suspend fun buildInputs(context: ExecutionContext) = ContainerPushInputs(
+        imageRef.get(), registry.get(), containerClient.get(), namespace.orNull()
+    )
 
-        if (fullRef != imageRef.get()) {
+    override fun buildOutputs() = ContainerPushOutputs()
+
+    override suspend fun execute(context: ExecutionContext, inputSet: ContainerPushInputs): ExecutionResult<ContainerPushOutputs> {
+        val clientCmd = inputSet.containerClient.command
+        val fullRef = if (inputSet.registry.isEmpty()) inputSet.imageRef else "${inputSet.registry}/${inputSet.imageRef}"
+
+        if (fullRef != inputSet.imageRef) {
             val tagResult = context.executeBash {
-                requiresElevation = containerClient.get().rootful
+                requiresElevation = inputSet.containerClient.rootful
                 command(clientCmd)
-                if (namespace.isPresent() && clientCmd.contains("nerdctl")) {
-                    args("--namespace", namespace.get())
+                if (inputSet.namespace != null && clientCmd.contains("nerdctl")) {
+                    args("--namespace", inputSet.namespace!!)
                 }
-                args("tag", imageRef.get(), fullRef)
+                args("tag", inputSet.imageRef, fullRef)
             }
-            if (tagResult is ExecutionResult.Failure) return tagResult
+            if (tagResult is ExecutionResult.Failure) return failure(tagResult.error, tagResult.exitCode)
         }
 
-        return context.executeBash {
-            requiresElevation = containerClient.get().rootful
+        val pushResult = context.executeBash {
+            requiresElevation = inputSet.containerClient.rootful
             command(clientCmd)
-            if (namespace.isPresent() && clientCmd.contains("nerdctl")) {
-                args("--namespace", namespace.get())
+            if (inputSet.namespace != null && clientCmd.contains("nerdctl")) {
+                args("--namespace", inputSet.namespace!!)
             }
             args("push")
             if (clientCmd.contains("nerdctl")) {
                 args("--all-platforms")
             }
             args(fullRef)
+        }
+        return when (pushResult) {
+            is ExecutionResult.Failure -> failure(pushResult.error, pushResult.exitCode)
+            else -> success { pushedRef.set(fullRef) }
         }
     }
 }

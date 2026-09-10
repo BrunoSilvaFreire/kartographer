@@ -3,6 +3,8 @@ package io.kartographer.daemon.project
 import io.kartographer.core.Property
 import io.kartographer.core.model.Node
 import io.kartographer.core.model.Task
+import io.kartographer.core.model.InputSetCodec
+import io.kartographer.core.scheduler.MaterializedInputs
 import java.lang.reflect.ParameterizedType
 
 /**
@@ -23,7 +25,7 @@ object TaskProperties {
         val valueType: Class<*>?
     )
 
-    fun declaredOn(task: Task): List<Declared> {
+    fun declaredOn(task: Task<*, *>): List<Declared> {
         val declared = mutableListOf<Declared>()
         // Walk up the hierarchy: a task type usually declares its properties on a superclass.
         generateSequence(task::class.java as Class<*>) { it.superclass }
@@ -45,26 +47,81 @@ object TaskProperties {
     fun typeNameOf(declared: Declared): String = declared.valueType?.simpleName ?: "Unknown"
 
     /**
-     * Applies raw `-P name=value` strings to the properties of [nodes], coercing each to the
-     * type its field declares.
+     * Applies raw `-P name=value` strings to the properties of [nodes] for the duration of
+     * [block], coercing each to the type its field declares and restoring the previous state
+     * afterwards.
+     *
+     * [materialize] only holds the values while inputs are built, which is enough for a task
+     * that reads its properties in `buildInputs`, but not for one that reads `property.get()`
+     * inside `execute` — that used to see the un-set value and silently ignore the flag. The
+     * restore keeps a value from sticking to the task instance the daemon reuses for the next
+     * run.
      *
      * @throws IllegalArgumentException if a name matches no property, so an unknown flag is
      * still a hard error rather than a silently ignored option.
      */
-    fun applyCliValues(nodes: Collection<Node>, values: Map<String, String>) {
-        if (values.isEmpty()) return
+    suspend fun <T> withCliValues(nodes: Collection<Node>, values: Map<String, String>, block: suspend () -> T): T {
+        if (values.isEmpty()) return block()
 
-        val tasks = nodes.filterIsInstance<Task>()
+        val tasks = nodes.filterIsInstance<Task<*, *>>()
         val typeByProperty = tasks.flatMap { declaredOn(it) }.associate { it.property to it.valueType }
         val byCliName = tasks
             .flatMap { it.registeredProperties }
             .filter { it.cliName != null }
             .associateBy { it.cliName!! }
 
-        for ((name, raw) in values) {
-            val property = byCliName[name] ?: throw IllegalArgumentException("Unknown property --$name")
-            @Suppress("UNCHECKED_CAST")
-            (property as Property<Any>).set(coerce(raw, typeByProperty[property]))
+        val snapshots = mutableMapOf<Property<*>, Property.Snapshot<*>>()
+        try {
+            for ((name, raw) in values) {
+                val property = byCliName[name] ?: throw IllegalArgumentException("Unknown property --$name")
+                snapshots.putIfAbsent(property, property.snapshot())
+                @Suppress("UNCHECKED_CAST")
+                (property as Property<Any>).set(coerce(raw, typeByProperty[property]))
+            }
+            return block()
+        } finally {
+            snapshots.forEach { (property, snapshot) ->
+                @Suppress("UNCHECKED_CAST")
+                (property as Property<Any>).restore(snapshot as Property.Snapshot<Any>)
+            }
+        }
+    }
+
+    fun validateCliValues(nodes: Collection<Node>, values: Map<String, String>) {
+        if (values.isEmpty()) return
+        val names = nodes
+            .flatMap { it.registeredProperties }
+            .mapNotNull { it.cliName }
+            .toSet()
+        values.keys.firstOrNull { it !in names }?.let { throw IllegalArgumentException("Unknown property --$it") }
+    }
+
+    suspend fun materialize(
+        task: Task<*, *>,
+        context: io.kartographer.core.model.ExecutionContext,
+        values: Map<String, String>
+    ): MaterializedInputs {
+        val declared = declaredOn(task)
+        val byCliName = declared.mapNotNull { item ->
+            item.property.cliName?.let { it to item }
+        }.toMap()
+        val snapshots = task.registeredProperties.associateWith { property -> property.snapshot() }
+        return try {
+            values.forEach { (name, raw) ->
+                val item = byCliName[name] ?: return@forEach
+                @Suppress("UNCHECKED_CAST")
+                (item.property as Property<Any>).set(coerce(raw, item.valueType))
+            }
+            val inputs = task.buildInputsAny(context)
+            val cliFields = values.keys.mapNotNull { cliName ->
+                byCliName[cliName]?.fieldName?.let { fieldName -> fieldName to cliName }
+            }.toMap()
+            MaterializedInputs(inputs, cliFields, InputSetCodec.fields(inputs))
+        } finally {
+            snapshots.forEach { (property, snapshot) ->
+                @Suppress("UNCHECKED_CAST")
+                (property as Property<Any>).restore(snapshot as Property.Snapshot<Any>)
+            }
         }
     }
 

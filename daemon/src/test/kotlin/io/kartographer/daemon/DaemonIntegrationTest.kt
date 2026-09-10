@@ -10,13 +10,15 @@ import org.junit.jupiter.api.Test
 import java.io.File
 import java.nio.file.Paths
 
-class TestExecTask(name: String) : Task(name) {
-    override suspend fun execute(context: ExecutionContext): ExecutionResult {
+class TestExecTask(name: String) : Task<NoInputs, NoOutputs>(name) {
+    override suspend fun buildInputs(context: ExecutionContext) = NoInputs()
+    override fun buildOutputs() = NoOutputs()
+    override suspend fun execute(context: ExecutionContext, inputSet: NoInputs): ExecutionResult<NoOutputs> {
         context.executeBash {
             command("echo")
             args("'Hello from integration test'")
         }
-        return ExecutionResult.Success
+        return success()
     }
 }
 
@@ -47,7 +49,7 @@ class DaemonIntegrationTest {
                 val result = client.executeRemote(task, context)
                 client.close()
 
-                assertTrue(result is ExecutionResult.Success)
+                assertTrue(result is ExecutionResult.Success<*>)
 
                 val logDir = File(System.getProperty("user.home"), ".kartographer/logs/runs/test-run-123")
                 val logFile = File(logDir, "test-exec-task.log")

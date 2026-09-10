@@ -1,6 +1,5 @@
 package io.kartographer.daemon.project
 
-import io.kartographer.core.model.Task
 import io.kartographer.core.model.TaskId
 import org.slf4j.LoggerFactory
 
@@ -35,7 +34,6 @@ object CompletionResolver {
 
         val target = project.nodes[TaskId(taskName)] ?: return emptyList()
         val properties = Nodes.closure(target, project.nodes)
-            .filterIsInstance<Task>()
             .flatMap { it.registeredProperties }
             .filter { it.cliName != null }
 

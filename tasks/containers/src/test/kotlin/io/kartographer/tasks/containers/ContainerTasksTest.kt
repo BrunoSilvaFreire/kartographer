@@ -122,6 +122,7 @@ class ContainerTasksTest {
             imageName.set("registry.example/image")
             containerfile.set("Dockerfile")
             version.set("release")
+            buildArgs.set(mapOf("PROJECT_VERSION" to "latest"))
             containerClient.set(ContainerClient.NERDCTL)
             namespace.set("k8s.io")
         }
@@ -142,7 +143,54 @@ class ContainerTasksTest {
                 "nerdctl --namespace k8s.io build -t registry.example/image:release -f Dockerfile " +
                     "--build-arg VERSION=release " +
                     "--build-arg GIT_COMMIT=0123456789abcdef0123456789abcdef01234567 " +
-                    "--build-arg BUILD_DATE=2026-07-29T17:00:00Z .",
+                    "--build-arg BUILD_DATE=2026-07-29T17:00:00Z " +
+                    "--build-arg PROJECT_VERSION=release .",
+            ),
+            capturedCommands,
+        )
+    }
+
+    @Test
+    fun multiPlatformBuildEmitsOneFlagPerPlatform() = runBlocking {
+        val capturedCommands = mutableListOf<String>()
+        val environment = object : ExecutionEnvironment {
+            override suspend fun execute(
+                command: String,
+                workingDir: String,
+                environment: Map<String, String>,
+                requiresElevation: Boolean,
+            ): Int {
+                capturedCommands.add(command)
+                return 0
+            }
+        }
+        val task = ContainerBuild("build-multiarch").apply {
+            imageName.set("registry.example/image")
+            containerfile.set("Dockerfile")
+            version.set("release")
+            platforms.set(listOf("linux/amd64", "linux/arm64"))
+            containerClient.set(ContainerClient.NERDCTL)
+            namespace.set("k8s.io")
+        }
+        val context = ExecutionContext(
+            projectDir = Paths.get("").toAbsolutePath(),
+            environment = mapOf(
+                "GIT_COMMIT" to "0123456789abcdef0123456789abcdef01234567",
+                "BUILD_DATE" to "2026-07-29T17:00:00Z",
+            ),
+            worker = Worker(WorkerId("test-worker")),
+            executionEnvironment = environment,
+        )
+
+        task.execute(context)
+
+        assertEquals(
+            listOf(
+                "nerdctl --namespace k8s.io build -t registry.example/image:release -f Dockerfile " +
+                    "--build-arg VERSION=release " +
+                    "--build-arg GIT_COMMIT=0123456789abcdef0123456789abcdef01234567 " +
+                    "--build-arg BUILD_DATE=2026-07-29T17:00:00Z " +
+                    "--platform linux/amd64 --platform linux/arm64 .",
             ),
             capturedCommands,
         )

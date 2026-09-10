@@ -62,7 +62,7 @@ class UpToDateTest {
 
         val t = task<DefaultTask>("hash-check-task") {
             inputs.file(tempDir.relativize(input).toString())
-            outputs.file(tempDir.relativize(output).toString())
+            trackedOutputs.file(tempDir.relativize(output).toString())
             action {
                 runCount++
                 Files.writeString(output, Files.readString(input) + " processed")
@@ -172,7 +172,7 @@ class UpToDateTest {
         var runCount = 0
         val t = task<DefaultTask>("newer-task") {
             inputs.file(tempDir.relativize(input).toString())
-            outputs.file(tempDir.relativize(output).toString())
+            trackedOutputs.file(tempDir.relativize(output).toString())
             upToDateWhenInputsNewerThanOutputs()
             action {
                 runCount++
@@ -240,5 +240,129 @@ class UpToDateTest {
         assertEquals(3, runCount)
 
         System.clearProperty("kartographer.test.prop")
+    }
+
+    @Test
+    fun testPropertiesAloneDoNotCache(@TempDir tempDir: Path) = runBlocking {
+        val t = task<PropertyOnlyTask>("property-only-task") {
+            spider.set("vivarealapi")
+        }
+
+        val context = ExecutionContext(projectDir = tempDir, worker = Worker(WorkerId("test-worker")))
+        val scheduler = ConcurrentScheduler(TaskRegistry.nodes)
+
+        scheduler.execute(t, context, { true })
+        scheduler.execute(t, context, { true })
+
+        assertEquals(2, t.runCount, "A task with no verifiable state must run every time")
+    }
+
+    @Test
+    fun testAlwaysRunOptOut(@TempDir tempDir: Path) = runBlocking {
+        val input = tempDir.resolve("input.txt")
+        val output = tempDir.resolve("output.txt")
+        Files.writeString(input, "content")
+
+        var runCount = 0
+        val t = task<DefaultTask>("always-run-task") {
+            inputs.file(tempDir.relativize(input).toString())
+            trackedOutputs.file(tempDir.relativize(output).toString())
+            alwaysRun()
+            action {
+                runCount++
+                Files.writeString(output, "processed")
+                Unit
+            }
+        }
+
+        val context = ExecutionContext(projectDir = tempDir, worker = Worker(WorkerId("test-worker")))
+        val scheduler = ConcurrentScheduler(TaskRegistry.nodes)
+
+        scheduler.execute(t, context, { true })
+        scheduler.execute(t, context, { true })
+
+        assertEquals(2, runCount, "alwaysRun() must beat declared inputs and outputs")
+        assertTrue(t.alwaysRuns)
+        assertTrue(Files.notExists(TaskStateStore.getStateFile(context, t)))
+    }
+
+    @Test
+    fun testDirtyDependencyForcesUnverifiableDependent(@TempDir tempDir: Path) = runBlocking {
+        // Producer has no verifiable state, so it always runs.
+        val producer = task<PropertyOnlyTask>("dirty-producer") {
+            spider.set("vivarealapi")
+        }
+        // Consumer declares an output but no inputs, so it cannot re-verify against the
+        // producer's fresh results and must re-run alongside it.
+        val consumerOut = tempDir.resolve("consumed.txt")
+        var consumerRuns = 0
+        val consumer = task<DefaultTask>("dirty-consumer") {
+            dependsOn(producer)
+            trackedOutputs.file(tempDir.relativize(consumerOut).toString())
+            action {
+                consumerRuns++
+                Files.writeString(consumerOut, "stable")
+                Unit
+            }
+        }
+
+        val context = ExecutionContext(projectDir = tempDir, worker = Worker(WorkerId("test-worker")))
+        val scheduler = ConcurrentScheduler(TaskRegistry.nodes)
+
+        scheduler.execute(consumer, context, { true })
+        scheduler.execute(consumer, context, { true })
+
+        assertEquals(2, producer.runCount)
+        assertEquals(2, consumerRuns, "A dependent that cannot re-verify must follow a dirty dependency")
+    }
+
+    @Test
+    fun testDirtyDependencyDoesNotForceVerifiableDependent(@TempDir tempDir: Path) = runBlocking {
+        val data = tempDir.resolve("data.txt")
+        val report = tempDir.resolve("report.txt")
+
+        // Always-run producer that happens to write identical bytes every time.
+        var producerRuns = 0
+        val producer = task<DefaultTask>("stable-producer") {
+            alwaysRun()
+            action {
+                producerRuns++
+                Files.writeString(data, "identical payload")
+                Unit
+            }
+        }
+        var consumerRuns = 0
+        val consumer = task<DefaultTask>("verifying-consumer") {
+            dependsOn(producer)
+            inputs.file(tempDir.relativize(data).toString())
+            trackedOutputs.file(tempDir.relativize(report).toString())
+            action {
+                consumerRuns++
+                Files.writeString(report, Files.readString(data) + " reported")
+                Unit
+            }
+        }
+
+        val context = ExecutionContext(projectDir = tempDir, worker = Worker(WorkerId("test-worker")))
+        val scheduler = ConcurrentScheduler(TaskRegistry.nodes)
+
+        scheduler.execute(consumer, context, { true })
+        scheduler.execute(consumer, context, { true })
+
+        assertEquals(2, producerRuns)
+        assertEquals(1, consumerRuns, "Unchanged bytes must not force downstream reprocessing")
+    }
+}
+
+// A task whose only declared signal is a property, like a spider parameterised by name.
+// It has nothing verifiable between runs, so it must always run.
+class PropertyOnlyTask(name: String) : Task<NoInputs, NoOutputs>(name) {
+    val spider = property<String>()
+    var runCount = 0
+    override suspend fun buildInputs(context: ExecutionContext) = NoInputs()
+    override fun buildOutputs() = NoOutputs()
+    override suspend fun execute(context: ExecutionContext, inputSet: NoInputs): ExecutionResult<NoOutputs> {
+        runCount++
+        return success()
     }
 }

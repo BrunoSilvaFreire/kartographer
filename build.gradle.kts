@@ -1,7 +1,7 @@
 plugins {
-    id("org.jetbrains.kotlin.jvm") version "1.9.22" apply false
-    id("org.jetbrains.kotlin.plugin.serialization") version "1.9.22" apply false
-    id("org.jetbrains.compose") version "1.5.11" apply false
+    id("org.jetbrains.kotlin.jvm") version "2.2.10" apply false
+    id("org.jetbrains.kotlin.plugin.serialization") version "2.2.10" apply false
+    id("org.jetbrains.kotlin.plugin.compose") version "2.2.10" apply false
     id("com.google.protobuf") version "0.9.4" apply false
     id("maven-publish")
 }

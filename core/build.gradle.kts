@@ -22,12 +22,12 @@ dependencies {
     // scripting *host* live in :daemon: an `implementation` dependency here would still land
     // on every consumer's runtime classpath, and kotlin-compiler-embeddable alone is 58 MB —
     // which is most of why the CLI used to take a second to start.
-    implementation("org.jetbrains.kotlin:kotlin-scripting-common:1.9.22")
-    implementation("org.jetbrains.kotlin:kotlin-scripting-jvm:1.9.22")
+    implementation("org.jetbrains.kotlin:kotlin-scripting-common:2.2.10")
+    implementation("org.jetbrains.kotlin:kotlin-scripting-jvm:2.2.10")
 
 
     // Kotlin reflection for plugin serialization/deserialization
-    implementation("org.jetbrains.kotlin:kotlin-reflect:1.9.20")
+    implementation("org.jetbrains.kotlin:kotlin-reflect:2.2.10")
 
     // gRPC and Protobuf dependencies
     implementation("io.grpc:grpc-netty-shaded:1.60.0")

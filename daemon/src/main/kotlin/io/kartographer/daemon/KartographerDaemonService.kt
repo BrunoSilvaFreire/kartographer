@@ -19,6 +19,7 @@ import io.kartographer.daemon.proto.*
 import io.kartographer.daemon.proto.KartographerDaemonGrpcKt.KartographerDaemonCoroutineImplBase
 import io.kartographer.daemon.run.DaemonCapabilities
 import io.kartographer.daemon.run.RunSession
+import io.kartographer.daemon.run.RunTracker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
@@ -33,7 +34,8 @@ import java.nio.file.Paths
 import java.util.concurrent.atomic.AtomicInteger
 
 class KartographerDaemonService(
-    private val projects: ProjectCache = ProjectCache()
+    private val projects: ProjectCache = ProjectCache(),
+    val runTracker: RunTracker = RunTracker()
 ) : KartographerDaemonCoroutineImplBase(), Closeable {
 
     companion object {
@@ -99,9 +101,13 @@ class KartographerDaemonService(
             completeResponse { }
         }
 
+    override suspend fun queryRuns(request: QueryRunsRequest): QueryRunsResponse =
+        runTracker.queryRuns(request)
+
     override fun runPipeline(requests: Flow<RunClientMessage>): Flow<RunServerMessage> = channelFlow {
         val outbound = Channel<RunServerMessage>(Channel.UNLIMITED)
         val started = CompletableDeferred<RunStart>()
+        val earlyStdin = mutableListOf<String>()
         var session: RunSession? = null
 
         // Pump: task threads produce events, but this is the single writer to the gRPC flow,
@@ -119,8 +125,12 @@ class KartographerDaemonService(
             try {
                 val context = start.context
                 projects.use(projectDirOf(context), context.pipeline.takeIf { it.isNotBlank() }) { project ->
-                    val runSession = RunSession(project, start, outbound)
-                    session = runSession
+                    val runSession = RunSession(project, start, outbound, runTracker)
+                    synchronized(earlyStdin) {
+                        session = runSession
+                        earlyStdin.forEach { runSession.onStdin(it) }
+                        earlyStdin.clear()
+                    }
                     runSession.execute()
                 }
             } catch (cancelled: CancellationException) {
@@ -146,6 +156,21 @@ class KartographerDaemonService(
                         RunClientMessage.MessageCase.START -> started.complete(message.start)
                         RunClientMessage.MessageCase.PROMPT_RESPONSE ->
                             session?.onPromptResponse(message.promptResponse.requestId, message.promptResponse.value)
+                        RunClientMessage.MessageCase.STDIN_DATA -> {
+                            val s = session
+                            if (s != null) {
+                                s.onStdin(message.stdinData.data)
+                            } else {
+                                synchronized(earlyStdin) {
+                                    val cur = session
+                                    if (cur != null) {
+                                        cur.onStdin(message.stdinData.data)
+                                    } else {
+                                        earlyStdin.add(message.stdinData.data)
+                                    }
+                                }
+                            }
+                        }
                         // Ctrl-C in the CLI: cancelling the job unwinds the scheduler's
                         // supervisor scope, which kills the child processes with it.
                         RunClientMessage.MessageCase.CANCEL -> runJob.cancel()
@@ -156,6 +181,9 @@ class KartographerDaemonService(
                 // The client hung up. Nothing will ever answer an outstanding prompt, so
                 // release the tasks blocked on one instead of leaving them parked forever.
                 session?.abandonPrompts("client disconnected")
+                if (runJob.isActive) {
+                    runJob.cancel()
+                }
                 if (!started.isCompleted) {
                     started.completeExceptionally(IllegalStateException("client closed the stream before starting a run"))
                 }
@@ -222,8 +250,8 @@ class KartographerDaemonService(
 
             for (f in request.inputFilesList) taskInstance.inputs.file(f)
             for (d in request.inputDirsList) taskInstance.inputs.dir(d)
-            for (f in request.outputFilesList) taskInstance.outputs.file(f)
-            for (d in request.outputDirsList) taskInstance.outputs.dir(d)
+            for (f in request.outputFilesList) taskInstance.trackedOutputs.file(f)
+            for (d in request.outputDirsList) taskInstance.trackedOutputs.dir(d)
 
             val redirect = ProcessBuilder.Redirect.appendTo(logFile)
             val context = ExecutionContext(
@@ -243,20 +271,28 @@ class KartographerDaemonService(
                 redirectError = redirect
             ).let { it.copy(executionEnvironment = io.kartographer.local.HostExecutionEnvironment(it)) }
 
-            when (val result = taskInstance.execute(context)) {
-                is ExecutionResult.Success -> executeTaskResponse {
+            val inputSet = taskInstance.buildInputsAny(context).also {
+                if (request.inputSetJson.isNotBlank()) {
+                    io.kartographer.core.model.InputSetCodec.applyCanonical(it, request.inputSetJson)
+                }
+            }
+            when (val result = taskInstance.executeAny(context, inputSet)) {
+                is ExecutionResult.Success<*> -> executeTaskResponse {
                     status = ExecuteTaskResponse.Status.SUCCESS
                     logPath = logFile.absolutePath
+                    outputSetJson = io.kartographer.core.model.OutputSetCodec.canonical(result.outputs)
                 }
-                is ExecutionResult.UpToDate -> executeTaskResponse {
+                is ExecutionResult.UpToDate<*> -> executeTaskResponse {
                     status = ExecuteTaskResponse.Status.UP_TO_DATE
                     logPath = logFile.absolutePath
+                    outputSetJson = io.kartographer.core.model.OutputSetCodec.canonical(result.outputs)
                 }
-                is ExecutionResult.Failure -> executeTaskResponse {
+                is ExecutionResult.Failure<*> -> executeTaskResponse {
                     status = ExecuteTaskResponse.Status.FAILURE
                     errorMessage = result.error.localizedMessage ?: "Unknown error"
                     exitCode = result.exitCode ?: 1
                     logPath = logFile.absolutePath
+                    outputSetJson = io.kartographer.core.model.OutputSetCodec.canonical(result.outputs)
                 }
             }
         } catch (t: Throwable) {

@@ -114,7 +114,9 @@ class ProjectCache(private val loader: KtsPipelineLoader = KtsPipelineLoader()) 
             val pipelineFile = File(pipeline)
             val cached = slot.project
 
-            if (cached != null && cached.fingerprint == currentFingerprint(pipelineFile, canonicalDir, cached.pluginSet)) {
+            if (cached != null && cached.fingerprint == currentFingerprint(
+                    pipelineFile, canonicalDir, cached.pluginSet, cached.registry.pipelineInputFiles
+                )) {
                 cached.retain()
                 return@withLock cached
             }
@@ -145,18 +147,24 @@ class ProjectCache(private val loader: KtsPipelineLoader = KtsPipelineLoader()) 
 
         // Taken after loading: compiling the local plugin rewrites its jar, so a signature
         // captured beforehand would look stale on the very next request.
-        val fingerprint = currentFingerprint(pipelineFile, projectDir, pluginSet)
+        val fingerprint = currentFingerprint(pipelineFile, projectDir, pluginSet, registry.pipelineInputFiles)
         return LoadedProject(projectDir, pipeline, registry, pluginSet, fingerprint)
     }
 
     // The global jars are folded in explicitly: a project set scans no directory of its own,
     // so installing or upgrading a global plugin would otherwise leave every project cached
     // against the old one.
-    private fun currentFingerprint(pipelineFile: File, projectDir: File, pluginSet: PluginSet) =
+    private fun currentFingerprint(
+        pipelineFile: File,
+        projectDir: File,
+        pluginSet: PluginSet,
+        pipelineInputs: Collection<String> = emptyList()
+    ) =
         ProjectFingerprint.of(
             pipelineFile,
             projectDir,
-            (pluginSet.getPluginJars() + PluginLoader.getPluginJars()).distinct()
+            (pluginSet.getPluginJars() + PluginLoader.getPluginJars()).distinct(),
+            pipelineInputs
         )
 
     private fun resolvePipeline(projectDir: File, pipelineSpec: String?): String {

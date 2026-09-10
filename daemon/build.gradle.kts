@@ -22,6 +22,8 @@ dependencies {
     implementation(project(":tasks:ansible"))
     implementation(project(":tasks:pulumi"))
     implementation(project(":tasks:flutter"))
+    implementation(project(":tasks:dart"))
+    implementation(project(":tasks:kubernetes"))
 
     // Coroutines and gRPC
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0")
@@ -32,13 +34,14 @@ dependencies {
     implementation("com.google.protobuf:protobuf-kotlin:3.25.1")
 
     // Kotlin scripting — the daemon compiles pipelines now, so the 58 MB compiler lives here
-    // and no longer reaches the CLI's runtime classpath.
-    implementation("org.jetbrains.kotlin:kotlin-scripting-common:1.9.22")
-    implementation("org.jetbrains.kotlin:kotlin-scripting-jvm:1.9.22")
-    implementation("org.jetbrains.kotlin:kotlin-scripting-jvm-host:1.9.22")
-    implementation("org.jetbrains.kotlin:kotlin-script-runtime:1.9.22")
-    implementation("org.jetbrains.kotlin:kotlin-compiler-embeddable:1.9.22")
-    implementation("org.jetbrains.kotlin:kotlin-scripting-compiler-embeddable:1.9.22")
+    // and no longer reaches the CLI's runtime classpath. These must match the project's Kotlin
+    // version: the embedded compiler reads the metadata of the task modules it compiles against.
+    implementation("org.jetbrains.kotlin:kotlin-scripting-common:2.2.10")
+    implementation("org.jetbrains.kotlin:kotlin-scripting-jvm:2.2.10")
+    implementation("org.jetbrains.kotlin:kotlin-scripting-jvm-host:2.2.10")
+    implementation("org.jetbrains.kotlin:kotlin-script-runtime:2.2.10")
+    implementation("org.jetbrains.kotlin:kotlin-compiler-embeddable:2.2.10")
+    implementation("org.jetbrains.kotlin:kotlin-scripting-compiler-embeddable:2.2.10")
     implementation("ch.qos.logback:logback-classic:1.5.3")
 
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")

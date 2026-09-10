@@ -1,7 +1,34 @@
 package io.kartographer.tasks.containers
 
+import io.kartographer.core.model.ExecutionContext
+import io.kartographer.core.model.ExecutionResult
+import io.kartographer.core.model.InputSet
+import io.kartographer.core.model.NoOutputs
+import io.kartographer.core.model.Task
 import io.kartographer.dsl.GroupSpec
-import io.kartographer.tasks.DefaultTask
+
+data class ImmutableReleaseTagInputs(var version: String) : InputSet()
+
+class ImmutableReleaseTag(name: String) : Task<ImmutableReleaseTagInputs, NoOutputs>(name) {
+    val version = property<String>().withCLI("version", "Override the image version")
+
+    override suspend fun buildInputs(context: ExecutionContext) = ImmutableReleaseTagInputs(version.get())
+    override fun buildOutputs() = NoOutputs()
+
+    override suspend fun execute(
+        context: ExecutionContext,
+        inputSet: ImmutableReleaseTagInputs,
+    ): ExecutionResult<NoOutputs> = if (inputSet.version == "latest") {
+        failure(
+            IllegalArgumentException(
+                "Production images require an immutable version (got 'latest'). " +
+                    "Set --version to a unique release identifier."
+            )
+        )
+    } else {
+        success()
+    }
+}
 
 /**
  * One image in a project's container set.
@@ -38,21 +65,14 @@ fun GroupSpec.containerMatrix(
     namespace: String,
     releaseTag: String,
     client: ContainerClient,
-    platform: String,
+    platforms: List<String>,
     containerdNamespace: String = "k8s.io",
     requireImmutableTag: Boolean = false,
     buildArgs: Map<String, String> = emptyMap(),
 ): Map<String, ContainerBuild> {
     val tagGuard = if (requireImmutableTag) {
-        task<DefaultTask>("validate_release_tag") {
-            action { _ ->
-                if (releaseTag == "latest") {
-                    throw RuntimeException(
-                        "Production images require an immutable RELEASE_TAG (got 'latest'). " +
-                            "Set RELEASE_TAG to a unique release identifier."
-                    )
-                }
-            }
+        task<ImmutableReleaseTag>("validate_release_tag") {
+            version.set(releaseTag)
         }
     } else {
         null
@@ -67,7 +87,7 @@ fun GroupSpec.containerMatrix(
                 containerfile.set(image.containerfile)
                 context.set(image.context)
                 containerClient.set(client)
-                this.platform.set(platform)
+                this.platforms.set(platforms)
                 this.namespace.set(containerdNamespace)
                 version.set(releaseTag)
                 if (buildArgs.isNotEmpty()) {
@@ -88,15 +108,25 @@ fun GroupSpec.containerMatrix(
     }
 
     group("push") {
+        // The group itself exposes --version so `push` can be run as a whole at
+        // one release tag; the value is applied to each member push (and, through
+        // its parametrized dependency, each build) by the CLI's property plumbing.
+        property<String> { withCLI("version", "Override the image version to build and push") }
         for (image in images) {
             val build = builds.getValue(image.name)
             task<ContainerPush>(image.name) {
-                imageRef.setProvider(build.imageRef)
+                // A parametrized dependency: `push/<image> --version=X` must
+                // build (and therefore tag) the image as X, not whatever
+                // RELEASE_TAG the build was registered with. The configured
+                // dependency pins the build invocation to this push's version.
+                val builtImage = dependsOn(build) { inputs ->
+                    version.directOrNull()?.let { inputs.version = it }
+                }
+                imageRef.setProvider(builtImage.imageRef)
                 // The image name already carries the registry host.
                 this.registry.set("")
                 containerClient.set(client)
                 this.namespace.set(containerdNamespace)
-                dependsOn(build)
             }
         }
     }

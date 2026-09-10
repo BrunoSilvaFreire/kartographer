@@ -15,7 +15,7 @@ import kotlin.test.assertNotNull
 class PulumiStepDefinitions {
     private val tasks = mutableMapOf<TaskId, Node>()
     private val capturedCommands = mutableListOf<String>()
-    private var executionResult: ExecutionResult? = null
+    private var executionResult: ExecutionResult<*>? = null
     private var projectDir: Path? = null
 
     private val mockExecutionEnv = object : ExecutionEnvironment {

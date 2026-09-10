@@ -15,7 +15,7 @@ import kotlin.test.assertTrue
 class ExecutionEventsStepDefinitions {
     private val tasks = mutableMapOf<TaskId, Node>()
     private val events = mutableListOf<String>()
-    private var executionResult: ExecutionResult? = null
+    private var executionResult: ExecutionResult<*>? = null
 
     private val observer = object : ExecutionObserver {
         override fun onEvent(event: ExecutionEvent) {
@@ -24,6 +24,7 @@ class ExecutionEventsStepDefinitions {
                 is ExecutionEvent.TaskQueued -> "TaskQueued"
                 is ExecutionEvent.TaskStarted -> "TaskStarted"
                 is ExecutionEvent.TaskOutput -> "TaskOutput"
+                is ExecutionEvent.TaskOutputProduced -> "TaskOutputProduced"
                 is ExecutionEvent.TaskCompleted -> "TaskCompleted"
                 is ExecutionEvent.PipelineCompleted -> "PipelineCompleted"
                 is ExecutionEvent.PromptRequested -> "PromptRequested"

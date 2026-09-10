@@ -22,7 +22,9 @@ Feature: Apt Tasks
     Then the executed apt command should start with "dpkg-deb --build"
 
   Scenario: Install debian package using a provider output
-    Given we load apt script "examples/apt/karto.kts"
+    Given a temporary directory for packaging
+    And a package file "src/app.bin" with content "binary"
+    And we load apt script "examples/apt/karto.kts"
     When we dry-run the AptInstall task "apt-inst-provider"
     Then the executed apt command should end with "apt-get install -y"
 

@@ -1,11 +1,20 @@
 package io.kartographer.tasks.pulumi
 
-import io.kartographer.tasks.DefaultTask
 import io.kartographer.core.model.ExecutionContext
 import io.kartographer.core.model.ExecutionResult
+import io.kartographer.core.model.InputSet
+import io.kartographer.core.model.NoOutputs
+import io.kartographer.core.model.Task
 import io.kartographer.core.model.executeBash
 
-open class PulumiTask(name: String) : DefaultTask(name) {
+data class PulumiInputs(
+    var pulumiBin: String,
+    var stack: String?,
+    var cwd: String?,
+    var args: List<String>
+) : InputSet()
+
+open class PulumiTask(name: String) : Task<PulumiInputs, NoOutputs>(name) {
     val pulumiBin = property<String> { set("pulumi") }
     val stack = property<String>()
     val cwd = property<String>()
@@ -17,45 +26,51 @@ open class PulumiTask(name: String) : DefaultTask(name) {
         topology { requiresCapability("pulumi") }
     }
 
-    protected suspend fun runPulumi(context: ExecutionContext, command: String): ExecutionResult {
+    override suspend fun buildInputs(context: ExecutionContext) = PulumiInputs(
+        pulumiBin.get(), stack.orNull(), cwd.orNull(), args.toList()
+    )
+
+    override fun buildOutputs() = NoOutputs()
+
+    protected suspend fun runPulumi(context: ExecutionContext, inputSet: PulumiInputs, command: String): ExecutionResult<NoOutputs> {
         return context.executeBash {
-            command(pulumiBin.get())
+            command(inputSet.pulumiBin)
             args(command)
-            if (stack.isPresent()) {
-                args("--stack", stack.get())
+            if (inputSet.stack != null) {
+                args("--stack", inputSet.stack!!)
             }
-            if (cwd.isPresent()) {
-                args("--cwd", cwd.get())
+            if (inputSet.cwd != null) {
+                args("--cwd", inputSet.cwd!!)
             }
-            args(this@PulumiTask.args)
+            args(inputSet.args)
         }
     }
 
-    override suspend fun execute(context: ExecutionContext): ExecutionResult {
-        return runPulumi(context, "preview") // Default behavior
+    override suspend fun execute(context: ExecutionContext, inputSet: PulumiInputs): ExecutionResult<NoOutputs> {
+        return runPulumi(context, inputSet, "preview") // Default behavior
     }
 }
 
 open class PulumiUp(name: String) : PulumiTask(name) {
-    override suspend fun execute(context: ExecutionContext): ExecutionResult {
-        return runPulumi(context, "up")
+    override suspend fun execute(context: ExecutionContext, inputSet: PulumiInputs): ExecutionResult<NoOutputs> {
+        return runPulumi(context, inputSet, "up")
     }
 }
 
 open class PulumiPreview(name: String) : PulumiTask(name) {
-    override suspend fun execute(context: ExecutionContext): ExecutionResult {
-        return runPulumi(context, "preview")
+    override suspend fun execute(context: ExecutionContext, inputSet: PulumiInputs): ExecutionResult<NoOutputs> {
+        return runPulumi(context, inputSet, "preview")
     }
 }
 
 open class PulumiRefresh(name: String) : PulumiTask(name) {
-    override suspend fun execute(context: ExecutionContext): ExecutionResult {
-        return runPulumi(context, "refresh")
+    override suspend fun execute(context: ExecutionContext, inputSet: PulumiInputs): ExecutionResult<NoOutputs> {
+        return runPulumi(context, inputSet, "refresh")
     }
 }
 
 open class PulumiDestroy(name: String) : PulumiTask(name) {
-    override suspend fun execute(context: ExecutionContext): ExecutionResult {
-        return runPulumi(context, "destroy")
+    override suspend fun execute(context: ExecutionContext, inputSet: PulumiInputs): ExecutionResult<NoOutputs> {
+        return runPulumi(context, inputSet, "destroy")
     }
 }

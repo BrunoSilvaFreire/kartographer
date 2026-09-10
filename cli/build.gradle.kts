@@ -1,6 +1,6 @@
 plugins {
     id("org.jetbrains.kotlin.jvm")
-    id("com.jakewharton.mosaic") version "0.11.0"
+    id("org.jetbrains.kotlin.plugin.compose")
     application
 }
 
@@ -16,7 +16,7 @@ repositories {
 dependencies {
     implementation(project(":core"))
     implementation("com.github.ajalt.clikt:clikt:4.4.0")
-    implementation("com.jakewharton.mosaic:mosaic-runtime:0.11.0")
+    implementation("com.jakewharton.mosaic:mosaic-runtime:0.18.0")
 
     // gRPC: core exposes the generated stubs, but its own gRPC dependencies are
     // `implementation`, so the client needs them declared here to compile against.

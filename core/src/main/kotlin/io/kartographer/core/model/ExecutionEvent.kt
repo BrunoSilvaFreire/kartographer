@@ -9,10 +9,16 @@ sealed interface ExecutionEvent {
     data class TaskOutput(val task: Node, val line: String, val isError: Boolean) : ExecutionEvent
     data class TaskCompleted(
         val task: Node,
-        val result: ExecutionResult,
+        val result: ExecutionResult<*>,
         val outputs: Map<String, String> = emptyMap()
     ) : ExecutionEvent
-    data class PipelineCompleted(val result: ExecutionResult) : ExecutionEvent
+    data class TaskOutputProduced(
+        val task: Node,
+        val name: String,
+        val value: String,
+        val secret: Boolean = false
+    ) : ExecutionEvent
+    data class PipelineCompleted(val result: ExecutionResult<*>) : ExecutionEvent
     data class PromptRequested(val task: Node?, val message: String) : ExecutionEvent
     object PromptCompleted : ExecutionEvent
 }

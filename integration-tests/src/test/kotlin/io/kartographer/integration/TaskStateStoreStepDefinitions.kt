@@ -1,5 +1,6 @@
 package io.kartographer.integration
 
+import kotlinx.coroutines.runBlocking
 import io.cucumber.java.en.Given
 import io.cucumber.java.en.When
 import io.cucumber.java.en.Then
@@ -52,22 +53,22 @@ class TaskStateStoreStepDefinitions {
 
     @When("we save the state of task {string}")
     fun when_save_state(name: String) {
-        val task = tasks[TaskId(name)] as? Task ?: throw IllegalArgumentException("Task $name not found")
+        val task = tasks[TaskId(name)] as? Task<*, *> ?: throw IllegalArgumentException("Task $name not found")
         val context = executionContext ?: throw IllegalStateException("Context not initialized")
-        TaskStateStore.saveState(context, task)
+        runBlocking { TaskStateStore.saveState(context, task) }
     }
 
     @Then("the task state file should exist on disk")
     fun then_state_file_exists() {
         val context = executionContext ?: throw IllegalStateException("Context not initialized")
-        val task = tasks.values.first() as Task
+        val task = tasks.values.first() as Task<*, *>
         val stateFile = TaskStateStore.getStateFile(context, task)
         assertTrue(Files.exists(stateFile), "State file does not exist at $stateFile")
     }
 
     @Then("we can load the task state of task {string}")
     fun then_load_state(name: String) {
-        val task = tasks[TaskId(name)] as? Task ?: throw IllegalArgumentException("Task $name not found")
+        val task = tasks[TaskId(name)] as? Task<*, *> ?: throw IllegalArgumentException("Task $name not found")
         val context = executionContext ?: throw IllegalStateException("Context not initialized")
         loadedState = TaskStateStore.loadState(context, task)
         assertNotNull(loadedState, "Loaded state was null")

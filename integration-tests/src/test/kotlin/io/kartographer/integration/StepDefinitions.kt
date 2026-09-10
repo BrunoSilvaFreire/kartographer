@@ -19,8 +19,8 @@ import kotlin.test.assertTrue
 
 class StepDefinitions {
     private val actionLog = mutableListOf<String>()
-    private val tasks = mutableMapOf<String, Task>()
-    private var executionResult: ExecutionResult? = null
+    private val tasks = mutableMapOf<String, Task<*, *>>()
+    private var executionResult: ExecutionResult<*>? = null
     private var worker: Worker? = null
     private var projectDir: Path? = null
     private var executionTimeMs: Long = 0
@@ -39,37 +39,43 @@ class StepDefinitions {
         name: String,
         private val delayMs: Long = 0,
         private val fail: Boolean = false
-    ) : Task(name) {
-        override suspend fun execute(context: ExecutionContext): ExecutionResult {
+    ) : Task<NoInputs, NoOutputs>(name) {
+        override suspend fun buildInputs(context: ExecutionContext) = NoInputs()
+        override fun buildOutputs() = NoOutputs()
+        override suspend fun execute(context: ExecutionContext, inputSet: NoInputs): ExecutionResult<NoOutputs> {
             if (fail) {
-                return ExecutionResult.Failure(RuntimeException("Task '$name' failed by request"))
+                return failure(RuntimeException("Task '$name' failed by request"))
             }
             if (delayMs > 0) {
                 kotlinx.coroutines.delay(delayMs)
             }
             actionLog.add(name)
-            return ExecutionResult.Success
+            return success()
         }
     }
 
-    inner class TestCopyTask(name: String, val src: String, val dest: String) : Task(name) {
-        override suspend fun execute(context: ExecutionContext): ExecutionResult {
+    inner class TestCopyTask(name: String, val src: String, val dest: String) : Task<NoInputs, NoOutputs>(name) {
+        override suspend fun buildInputs(context: ExecutionContext) = NoInputs()
+        override fun buildOutputs() = NoOutputs()
+        override suspend fun execute(context: ExecutionContext, inputSet: NoInputs): ExecutionResult<NoOutputs> {
             actionLog.add(name)
             val srcFile = context.projectDir.resolve(src)
             val destFile = context.projectDir.resolve(dest)
             Files.createDirectories(destFile.parent)
             Files.writeString(destFile, Files.readString(srcFile))
-            return ExecutionResult.Success
+            return success()
         }
     }
 
-    inner class TestPropTask(name: String, val propName: String) : Task(name) {
+    inner class TestPropTask(name: String, val propName: String) : Task<NoInputs, NoOutputs>(name) {
         init {
             trackProperty(propName) { customPropertyValues[propName] ?: "" }
         }
-        override suspend fun execute(context: ExecutionContext): ExecutionResult {
+        override suspend fun buildInputs(context: ExecutionContext) = NoInputs()
+        override fun buildOutputs() = NoOutputs()
+        override suspend fun execute(context: ExecutionContext, inputSet: NoInputs): ExecutionResult<NoOutputs> {
             actionLog.add(name)
-            return ExecutionResult.Success
+            return success()
         }
     }
 
@@ -122,7 +128,7 @@ class StepDefinitions {
             targetNode = target,
             context = context,
             checkTopology = { node ->
-                if (node !is Task) true else {
+                if (node !is Task<*, *>) true else {
                     node.topologyRequirements.all { req ->
                         when (req) {
                             is TopologyRequirement.LocalOnly -> true
@@ -148,7 +154,7 @@ class StepDefinitions {
 
     @Then("the pipeline execution should succeed")
     fun then_pipeline_succeeds() {
-        assertTrue(executionResult is ExecutionResult.Success, "Expected pipeline success but got $executionResult")
+        assertTrue(executionResult is ExecutionResult.Success<*>, "Expected pipeline success but got $executionResult")
     }
 
     @Then("the execution should take less than {int} milliseconds")
@@ -158,18 +164,18 @@ class StepDefinitions {
 
     @Then("all tasks should complete successfully")
     fun then_all_tasks_succeed() {
-        assertTrue(executionResult is ExecutionResult.Success)
+        assertTrue(executionResult is ExecutionResult.Success<*>)
     }
 
     @Then("the pipeline execution should fail")
     fun then_pipeline_fails() {
-        assertTrue(executionResult is ExecutionResult.Failure, "Expected pipeline failure but got $executionResult")
+        assertTrue(executionResult is ExecutionResult.Failure<*>, "Expected pipeline failure but got $executionResult")
     }
 
     @Then("the task {string} should report a failure")
     fun then_task_reports_failure(name: String) {
         val res = executionResult
-        assertTrue(res is ExecutionResult.Failure, "Result is not Failure for task $name")
+        assertTrue(res is ExecutionResult.Failure<*>, "Result is not Failure for task $name")
     }
 
     // Step Definitions for uptodate_system.feature
@@ -208,14 +214,14 @@ class StepDefinitions {
     fun given_task_defines_in_out(name: String, input: String, output: String) {
         val task = tasks[name] ?: throw IllegalArgumentException("Task $name not found")
         task.inputs.file(input)
-        task.outputs.file(output)
+        task.trackedOutputs.file(output)
     }
 
     @Given("the task {string} has input {string} and output {string}")
     fun given_task_has_in_out(name: String, input: String, output: String) {
         val task = tasks[name] ?: throw IllegalArgumentException("Task $name not found")
         task.inputs.file(input)
-        task.outputs.file(output)
+        task.trackedOutputs.file(output)
     }
 
     @Given("the task {string} uses the inputs newer than outputs check")
@@ -292,13 +298,13 @@ class StepDefinitions {
     @Then("the task {string} should be executed successfully")
     fun then_task_executed_success(name: String) {
         assertTrue(actionLog.contains(name))
-        assertTrue(executionResult is ExecutionResult.Success)
+        assertTrue(executionResult is ExecutionResult.Success<*>)
     }
 
     @Then("the task {string} should report a capability failure")
     fun then_task_reports_capability_failure(name: String) {
         val res = executionResult
-        assertTrue(res is ExecutionResult.Failure, "Expected failure for task $name")
+        assertTrue(res is ExecutionResult.Failure<*>, "Expected failure for task $name")
         assertTrue(res.error.message?.contains("topology requirements not satisfied") == true, "Expected topology failure for task $name but got: ${res.error.message}")
     }
 
@@ -343,7 +349,7 @@ class StepDefinitions {
     @Then("the executed command should start with {string}")
     fun then_command_starts_with(expectedStart: String) {
         val result = executionResult
-        assertTrue(result is ExecutionResult.Success)
+        assertTrue(result is ExecutionResult.Success<*>)
         val cmd = capturedCommands.firstOrNull()
         assertNotNull(cmd, "No command was generated")
         assertTrue(cmd.startsWith(expectedStart), "Command '$cmd' did not start with '$expectedStart'")
@@ -480,7 +486,7 @@ class StepDefinitions {
     @Then("the task execution should fail with IllegalArgumentException")
     fun then_task_fails_illegal_arg() {
         val res = executionResult
-        assertTrue(res is ExecutionResult.Failure, "Expected failure but got $res")
+        assertTrue(res is ExecutionResult.Failure<*>, "Expected failure but got $res")
         assertTrue(res.error is IllegalArgumentException, "Expected IllegalArgumentException but got ${res.error}")
     }
 

@@ -30,6 +30,9 @@ service KartographerDaemon {
 
   // Ask the daemon to exit once in-flight runs finish.
   rpc Shutdown (ShutdownRequest) returns (ShutdownResponse);
+
+  // Query running and recent runs, task states, and live outputs.
+  rpc QueryRuns (QueryRunsRequest) returns (QueryRunsResponse);
 }
 
 message WorkerInfoRequest {}
@@ -57,6 +60,8 @@ message ExecuteTaskRequest {
   string project_dir = 9;
   map<string, string> environment = 10;
   bool dry_run = 11;
+  string input_set_json = 12;
+  string invocation_id = 13;
 }
 
 message ExecuteTaskResponse {
@@ -69,6 +74,7 @@ message ExecuteTaskResponse {
   string error_message = 2;
   int32 exit_code = 3;
   string log_path = 4;        // Path to the log file on the daemon host
+  string output_set_json = 5;
 }
 
 // ---------------------------------------------------------------------------
@@ -111,12 +117,15 @@ message NodeInfo {
   repeated PropertyInfo properties = 4;
   bool is_task = 5;
   bool requires_elevation = 6;
+  bool always_runs = 7;                  // No cacheable result; runs on every invocation
 }
 
 // A node with its dependencies resolved through the DAG, for `karto graph`.
 message ResolvedNode {
   string name = 1;
   repeated string dependencies = 2;
+  string invocation_id = 3;
+  string display_name = 4;
 }
 
 message DescribeProjectRequest {
@@ -158,6 +167,10 @@ message PromptResponse {
   string value = 2;
 }
 
+message StdinData {
+  string data = 1;
+}
+
 message RunCancel {}
 
 message RunClientMessage {
@@ -165,6 +178,7 @@ message RunClientMessage {
     RunStart start = 1;
     PromptResponse prompt_response = 2;
     RunCancel cancel = 3;
+    StdinData stdin_data = 4;
   }
 }
 
@@ -173,14 +187,15 @@ message PipelineStarted {
   repeated ResolvedNode graph = 2;
 }
 
-message TaskQueued { string task = 1; }
+message TaskQueued { string task = 1; string invocation_id = 2; }
 
-message TaskStarted { string task = 1; }
+message TaskStarted { string task = 1; string invocation_id = 2; }
 
 message TaskOutput {
   string task = 1;
   string line = 2;
   bool is_error = 3;
+  string invocation_id = 4;
 }
 
 message TaskCompleted {
@@ -189,6 +204,15 @@ message TaskCompleted {
   string error_message = 3;
   int32 exit_code = 4;
   map<string, string> outputs = 5;       // Task.collectOutputs(), secrets already masked
+  string invocation_id = 6;
+}
+
+message TaskOutputProduced {
+  string task = 1;
+  string name = 2;
+  string value = 3;
+  bool is_secret = 4;
+  string invocation_id = 5;
 }
 
 enum PromptKind {
@@ -205,6 +229,7 @@ message PromptRequested {
   bool secret = 4;
   PromptKind kind = 5;
   repeated string elevated_tasks = 6;
+  string invocation_id = 7;
 }
 
 message PipelineCompleted {
@@ -229,7 +254,41 @@ message RunServerMessage {
     PromptRequested prompt_requested = 6;
     PipelineCompleted pipeline_completed = 7;
     RunError error = 8;
+    TaskOutputProduced task_output_produced = 9;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Run Inspection & Querying
+// ---------------------------------------------------------------------------
+
+message QueryRunsRequest {
+  string project_dir = 1;             // Optional filter by project directory
+  bool active_only = 2;               // If true, returns only currently active runs
+}
+
+message TaskExecutionInfo {
+  string task_name = 1;
+  string state = 2;                  // "QUEUED", "RUNNING", "COMPLETED", "FAILED"
+  int64 started_at_millis = 3;
+  int64 completed_at_millis = 4;
+  map<string, string> outputs = 5;
+  string error_message = 6;
+  string invocation_id = 7;
+}
+
+message RunInfo {
+  string run_id = 1;
+  string project_dir = 2;
+  string target_task = 3;
+  string state = 4;                  // "RUNNING", "COMPLETED", "FAILED", "CANCELLED"
+  int64 started_at_millis = 5;
+  int64 completed_at_millis = 6;
+  repeated TaskExecutionInfo tasks = 7;
+}
+
+message QueryRunsResponse {
+  repeated RunInfo runs = 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -275,6 +334,7 @@ message LocalRequest {
     CompleteRequest complete = 3;
     RunClientMessage run = 4;
     ShutdownRequest shutdown = 5;
+    QueryRunsRequest query_runs = 6;
   }
 }
 
@@ -291,5 +351,6 @@ message LocalResponse {
     RunServerMessage run = 4;
     ShutdownResponse shutdown = 5;
     LocalError error = 6;
+    QueryRunsResponse query_runs = 7;
   }
 }

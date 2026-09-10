@@ -8,7 +8,7 @@ import kotlin.reflect.jvm.isAccessible
 
 object TaskSerializer {
 
-    fun serializeProperties(task: Task): Map<String, String> {
+    suspend fun serializeProperties(task: Task<*, *>): Map<String, String> {
         val properties = mutableMapOf<String, String>()
         @Suppress("UNCHECKED_CAST")
         val taskClass = task::class as kotlin.reflect.KClass<Any>
@@ -22,7 +22,10 @@ object TaskSerializer {
                 val value = prop.get(task) ?: continue
                 
                 val actualValue = if (value is Property<*>) {
-                    if (value.isPresent()) value.get() else null
+                    // A secret never crosses the wire to a remote worker: the
+                    // worker resolves the provider itself, or the task fails
+                    // there rather than the value being shipped in a request.
+                    if (value.isPresent() && !value.secret) value.get() else null
                 } else {
                     value
                 } ?: continue
@@ -43,7 +46,7 @@ object TaskSerializer {
         return properties
     }
 
-    fun deserializeProperties(task: Task, properties: Map<String, String>) {
+    fun deserializeProperties(task: Task<*, *>, properties: Map<String, String>) {
         @Suppress("UNCHECKED_CAST")
         val taskClass = task::class as kotlin.reflect.KClass<Any>
 
@@ -101,8 +104,9 @@ object TaskSerializer {
     private fun isBaseTaskProperty(name: String): Boolean {
         return name in setOf(
             "id", "name", "dependencyObjects", "dependencyNames", 
-            "inputs", "outputs", "topologyRequirements", 
+            "inputs", "outputs", "trackedOutputs", "topologyRequirements", 
             "registeredProperties", "declaredOutputs", "upToDateChecks",
+            "neverUpToDate", "alwaysRuns", "hasVerifiableState", "canReverify",
             "customFilesToTrack", "customPropertiesToTrack"
         )
     }

@@ -120,12 +120,14 @@ class LocalPluginReloadingStepDefinitions {
             import io.kartographer.core.model.Task
             import io.kartographer.core.model.ExecutionContext
             import io.kartographer.core.model.ExecutionResult
+            import io.kartographer.core.model.NoInputs
+            import io.kartographer.core.model.NoOutputs
             
-            open class $taskName(name: String) : Task(name) {
+            open class $taskName(name: String) : Task<NoInputs, NoOutputs>(name) {
                 val $propName = property<Int> { set($defaultValue) }
-                override suspend fun execute(context: ExecutionContext): ExecutionResult {
-                    return ExecutionResult.Success
-                }
+                override suspend fun buildInputs(context: ExecutionContext) = NoInputs()
+                override fun buildOutputs() = NoOutputs()
+                override suspend fun execute(context: ExecutionContext, inputSet: NoInputs) = success()
             }
         """.trimIndent())
     }
@@ -144,12 +146,12 @@ class LocalPluginReloadingStepDefinitions {
     fun then_task_has_property_value(taskName: String, propName: String, expectedValue: Int) {
         val node = loadedNodes[TaskId(taskName)]
         assertNotNull(node, "Task '$taskName' was not registered by the pipeline")
-        val task = node as? Task ?: error("Node '$taskName' is not a Task")
+        val task = node as? Task<*, *> ?: error("Node '$taskName' is not a Task")
         
         val propField = task::class.java.getDeclaredField(propName)
         propField.isAccessible = true
         val prop = propField.get(task) as Property<*>
-        assertEquals(expectedValue, prop.get())
+        assertEquals(expectedValue, runBlocking { prop.get() })
     }
 
     @When("we modify the custom local plugin task {string} property {string} default value to {int}")

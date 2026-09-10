@@ -119,6 +119,8 @@ class LocalProtocolServer(
                 localResponse { complete = service.complete(request.complete) }
             LocalRequest.RequestCase.SHUTDOWN ->
                 localResponse { shutdown = service.shutdown(request.shutdown) }
+            LocalRequest.RequestCase.QUERY_RUNS ->
+                localResponse { queryRuns = service.queryRuns(request.queryRuns) }
             else -> localResponse {
                 error = localError { message = "Unsupported request ${request.requestCase}"; code = 2 }
             }

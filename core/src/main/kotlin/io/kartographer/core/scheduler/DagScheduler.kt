@@ -28,7 +28,7 @@ class DagScheduler(private val nodes: Map<TaskId, Node>) {
             }
 
             // Resolve property-based implicit dependencies
-            if (node is Task) {
+            if (node is Task<*, *>) {
                 for (prop in node.registeredProperties) {
                     prop.producingTask?.let { producer ->
                         deps.add(producer)
