@@ -5,7 +5,7 @@ import io.cucumber.java.en.When
 import io.cucumber.java.en.Then
 import io.kartographer.core.model.*
 import io.kartographer.core.scheduler.ConcurrentScheduler
-import io.kartographer.tasks.DefaultTask
+import io.kartographer.testing.ScriptedTask
 import io.kartographer.daemon.project.KtsPipelineLoader
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Files

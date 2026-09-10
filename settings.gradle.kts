@@ -2,6 +2,7 @@ rootProject.name = "kartographer"
 
 include("core")
 include("tasks:go")
+include("tasks:npm")
 include("tasks:proto")
 include("tasks:gradle")
 include("tasks:containers")

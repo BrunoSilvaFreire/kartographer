@@ -5,7 +5,7 @@ import io.kartographer.core.model.*
 import io.kartographer.core.scheduler.ConcurrentScheduler
 import io.kartographer.dsl.task
 import io.kartographer.dsl.TaskRegistry
-import io.kartographer.tasks.DefaultTask
+import io.kartographer.testing.ScriptedTask
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -29,7 +29,7 @@ class ConcurrentSchedulerTest {
         var bFinishedAt: Long = 0
         var cStartedAt: Long = 0
 
-        val a = task<DefaultTask>("A") {
+        val a = task<ScriptedTask>("A") {
             action {
                 aStartedAt = System.currentTimeMillis()
                 delay(150)
@@ -38,7 +38,7 @@ class ConcurrentSchedulerTest {
             }
         }
 
-        val b = task<DefaultTask>("B") {
+        val b = task<ScriptedTask>("B") {
             action {
                 bStartedAt = System.currentTimeMillis()
                 delay(150)
@@ -47,7 +47,7 @@ class ConcurrentSchedulerTest {
             }
         }
 
-        val c = task<DefaultTask>("C") {
+        val c = task<ScriptedTask>("C") {
             dependsOn(a, b)
             action {
                 cStartedAt = System.currentTimeMillis()
@@ -85,13 +85,13 @@ class ConcurrentSchedulerTest {
     fun testFailFastCancelation() = runBlocking {
         var bRan = false
 
-        val a = task<DefaultTask>("A") {
+        val a = task<ScriptedTask>("A") {
             action {
                 throw RuntimeException("Task A fails immediately")
             }
         }
 
-        val b = task<DefaultTask>("B") {
+        val b = task<ScriptedTask>("B") {
             action {
                 delay(200)
                 bRan = true
@@ -99,7 +99,7 @@ class ConcurrentSchedulerTest {
             }
         }
 
-        val c = task<DefaultTask>("C") {
+        val c = task<ScriptedTask>("C") {
             dependsOn(a, b)
             action {}
         }

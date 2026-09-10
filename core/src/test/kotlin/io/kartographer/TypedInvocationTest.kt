@@ -5,6 +5,7 @@ import io.kartographer.core.model.*
 import io.kartographer.core.scheduler.ConcurrentScheduler
 import io.kartographer.core.scheduler.MaterializedInputs
 import io.kartographer.dsl.NodeRegistry
+import io.kartographer.testing.ScriptedTask
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.*
@@ -78,7 +79,7 @@ class TypedInvocationTest {
     @Test fun `configured invocations overlap and deliver exact typed outputs`() = runBlocking {
         val registry = NodeRegistry()
         val prerequisiteRuns = AtomicInteger()
-        val prerequisite = io.kartographer.tasks.DefaultTask("prepare").apply {
+        val prerequisite = ScriptedTask("prepare").apply {
             action { prerequisiteRuns.incrementAndGet() }
         }
         val producer = InvocationTask("build").apply { dependsOn(prerequisite) }

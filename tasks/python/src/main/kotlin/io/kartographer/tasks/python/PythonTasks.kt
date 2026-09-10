@@ -6,6 +6,7 @@ import io.kartographer.core.model.ExecSpec
 import io.kartographer.core.model.InputSet
 import io.kartographer.core.model.NoOutputs
 import io.kartographer.core.model.Task
+import io.kartographer.core.model.executeBash
 import io.kartographer.core.model.executeSpec
 
 class PythonSpec : ExecSpec() {
@@ -49,7 +50,8 @@ open class PythonExecInputs(
     var moduleName: String?,
     var pythonBin: String,
     var environment: Map<String, String>,
-    var args: List<String>
+    var args: List<String>,
+    var workingDir: String? = null
 ) : InputSet()
 
 abstract class PythonExecTaskBase<I : PythonExecInputs>(name: String) : Task<I, NoOutputs>(name) {
@@ -60,6 +62,7 @@ abstract class PythonExecTaskBase<I : PythonExecInputs>(name: String) : Task<I, 
     val scriptPath = property<String>()
     val moduleName = property<String>()
     val pythonBin = property<String> { set("python3") }
+    val workingDir = property<String>()
     
     val environment = mutableMapOf<String, String>()
     
@@ -83,7 +86,8 @@ abstract class PythonExecTaskBase<I : PythonExecInputs>(name: String) : Task<I, 
         moduleName.orNull(),
         pythonBin.get(),
         environment.toMap(),
-        args.toList()
+        args.toList(),
+        workingDir.orNull()
     )
 
     override fun buildOutputs() = NoOutputs()
@@ -98,6 +102,7 @@ abstract class PythonExecTaskBase<I : PythonExecInputs>(name: String) : Task<I, 
             this.moduleName = inputSet.moduleName
             this.pythonBin = inputSet.pythonBin
             this.args.addAll(inputSet.args)
+            inputSet.workingDir?.let { this.workingDir = it }
             this.onStdoutLine = this@PythonExecTaskBase.onStdoutLine
             this.onStderrLine = this@PythonExecTaskBase.onStderrLine
             for ((k, v) in inputSet.environment) {
@@ -115,3 +120,59 @@ open class PythonExecTask(name: String) : PythonExecTaskBase<PythonExecInputs>(n
         inputSet: PythonExecInputs
     ): ExecutionResult<NoOutputs> = executePythonInputs(context, inputSet)
 }
+
+data class PythonVenvInputs(
+    var pythonBin: String,
+    var venv: String,
+    var requirements: String?,
+    var upgradePip: Boolean
+) : InputSet()
+
+class PythonVenv(name: String) : Task<PythonVenvInputs, NoOutputs>(name) {
+    var pythonBin = "python3"
+    var venv = ".venv"
+    var requirements: String? = "requirements.txt"
+    var upgradePip = false
+
+    override suspend fun buildInputs(context: ExecutionContext) =
+        PythonVenvInputs(pythonBin, venv, requirements, upgradePip)
+    override fun buildOutputs() = NoOutputs()
+    override suspend fun execute(context: ExecutionContext, inputSet: PythonVenvInputs): ExecutionResult<NoOutputs> {
+        val create = context.executeBash { command(inputSet.pythonBin); args("-m", "venv", inputSet.venv) }
+        if (create is ExecutionResult.Failure) return create
+        val pip = "${inputSet.venv}/bin/pip"
+        if (inputSet.upgradePip) {
+            val upgrade = context.executeBash { command(pip); args("install", "--upgrade", "pip") }
+            if (upgrade is ExecutionResult.Failure) return upgrade
+        }
+        return inputSet.requirements?.let { requirements ->
+            context.executeBash { command(pip); args("install", "-r", requirements) }
+        } ?: success()
+    }
+}
+
+data class PoetryInputs(
+    var poetryBin: String,
+    var workingDir: String?,
+    var args: List<String>
+) : InputSet()
+
+abstract class PoetryTask(name: String) : Task<PoetryInputs, NoOutputs>(name) {
+    var poetryBin = "poetry"
+    var workingDir: String? = null
+    val args = mutableListOf<String>()
+    protected abstract val commandName: String
+
+    override suspend fun buildInputs(context: ExecutionContext) =
+        PoetryInputs(poetryBin, workingDir, args.toList())
+    override fun buildOutputs() = NoOutputs()
+    override suspend fun execute(context: ExecutionContext, inputSet: PoetryInputs) = context.executeBash {
+        command(inputSet.poetryBin)
+        args(commandName)
+        args(inputSet.args)
+        inputSet.workingDir?.let { workingDir = it }
+    }
+}
+
+class PoetryCheck(name: String) : PoetryTask(name) { override val commandName = "check" }
+class PoetryBuild(name: String) : PoetryTask(name) { override val commandName = "build" }

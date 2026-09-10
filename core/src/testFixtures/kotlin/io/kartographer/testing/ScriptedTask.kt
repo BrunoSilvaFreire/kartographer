@@ -1,14 +1,20 @@
-package io.kartographer.tasks
+package io.kartographer.testing
 
 import io.kartographer.core.model.ExecutionContext
 import io.kartographer.core.model.ExecutionResult
-import io.kartographer.core.model.Task
 import io.kartographer.core.model.NoInputs
 import io.kartographer.core.model.NoOutputs
-import io.kartographer.local.LocalProcessExecutor
-import org.slf4j.LoggerFactory
+import io.kartographer.core.model.Task
 
-open class DefaultTask(name: String) : Task<NoInputs, NoOutputs>(name) {
+/**
+ * A task whose body is supplied as a lambda.
+ *
+ * This exists purely so scheduler / up-to-date / protocol tests can exercise the engine without
+ * inventing a bespoke task type per assertion. It is deliberately confined to test fixtures:
+ * real pipelines declare dedicated task types, which is what makes remote execution (where a task
+ * is reconstructed from its class name) and CLI introspection work at all.
+ */
+open class ScriptedTask(name: String) : Task<NoInputs, NoOutputs>(name) {
     private var action: (suspend (ExecutionContext) -> Any)? = null
 
     fun action(block: suspend (ExecutionContext) -> Any) {

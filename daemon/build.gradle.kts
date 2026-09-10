@@ -17,6 +17,7 @@ dependencies {
     implementation(project(":tasks:containers"))
     implementation(project(":tasks:python"))
     implementation(project(":tasks:go"))
+    implementation(project(":tasks:npm"))
     implementation(project(":tasks:gradle"))
     implementation(project(":tasks:proto"))
     implementation(project(":tasks:ansible"))
@@ -44,6 +45,7 @@ dependencies {
     implementation("org.jetbrains.kotlin:kotlin-scripting-compiler-embeddable:2.2.10")
     implementation("ch.qos.logback:logback-classic:1.5.3")
 
+    testImplementation(testFixtures(project(":core")))
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

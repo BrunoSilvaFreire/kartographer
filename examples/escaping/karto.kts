@@ -1,11 +1,11 @@
-import io.kartographer.tasks.DefaultTask
+import io.kartographer.testing.ScriptedTask
 
-task<DefaultTask>("escape-test") {
+task<ScriptedTask>("escape-test") {
     // We will add steps in the tests, but let's define it so it exists.
 }
-task<DefaultTask>("env-test") {
+task<ScriptedTask>("env-test") {
     // We will define this in test
 }
-task<DefaultTask>("elevated-task") {
+task<ScriptedTask>("elevated-task") {
     // We will define this in test
 }

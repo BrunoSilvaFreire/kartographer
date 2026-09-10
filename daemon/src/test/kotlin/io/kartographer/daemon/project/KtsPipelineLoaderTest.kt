@@ -4,7 +4,7 @@ import io.kartographer.core.model.TaskId
 import io.kartographer.core.plugins.PluginLoader
 import io.kartographer.dsl.NodeRegistry
 import io.kartographer.dsl.TaskRegistry
-import io.kartographer.tasks.DefaultTask
+import io.kartographer.testing.ScriptedTask
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
@@ -15,7 +15,7 @@ class KtsPipelineLoaderTest {
     @Test
     fun `loads a script into the supplied registry`() {
         val scriptContent = """
-            task<DefaultTask>("compile") {
+            task<ScriptedTask>("compile") {
                 inputs.dir("src")
                 action { context ->
                     context.executeBash {
@@ -42,9 +42,9 @@ class KtsPipelineLoaderTest {
 
             assertEquals(1, tasks.size)
             val task = tasks.values.first()
-            assertTrue(task is DefaultTask)
+            assertTrue(task is ScriptedTask)
             assertEquals("compile", task.name)
-            assertEquals("src", (task as DefaultTask).inputs.dirs.first())
+            assertEquals("src", (task as ScriptedTask).inputs.dirs.first())
 
             // The whole point of the registry argument: the process-wide default is untouched,
             // so a second project loading in this JVM starts from a clean slate.

@@ -30,6 +30,7 @@ dependencies {
     testImplementation("io.cucumber:cucumber-java:7.18.0")
     testImplementation("io.cucumber:cucumber-junit-platform-engine:7.18.0")
     testImplementation("org.junit.platform:junit-platform-suite:1.10.1")
+    testImplementation(testFixtures(project(":core")))
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

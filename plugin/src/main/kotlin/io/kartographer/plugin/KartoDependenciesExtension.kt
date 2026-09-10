@@ -22,6 +22,10 @@ open class KartoDependenciesExtension @Inject constructor(private val project: P
         project.dependencies.add("implementation", "io.kartographer:go:$version")
     }
 
+    fun npm() {
+        project.dependencies.add("implementation", "io.kartographer:npm:$version")
+    }
+
     fun gradle() {
         project.dependencies.add("implementation", "io.kartographer:gradle:$version")
     }

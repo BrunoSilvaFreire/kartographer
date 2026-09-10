@@ -15,6 +15,7 @@ dependencies {
     implementation(project(":tasks:python"))
     implementation(project(":tasks:apt"))
     implementation(project(":tasks:go"))
+    implementation(project(":tasks:npm"))
     implementation(project(":tasks:proto"))
 }
 

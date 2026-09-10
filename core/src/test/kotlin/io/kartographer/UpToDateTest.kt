@@ -6,7 +6,7 @@ import io.kartographer.core.scheduler.ConcurrentScheduler
 import io.kartographer.core.scheduler.TaskStateStore
 import io.kartographer.dsl.task
 import io.kartographer.dsl.TaskRegistry
-import io.kartographer.tasks.DefaultTask
+import io.kartographer.testing.ScriptedTask
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -26,7 +26,7 @@ class UpToDateTest {
     @Test
     fun testCustomUpToDateCheck() = runBlocking {
         var runCount = 0
-        val t = task<DefaultTask>("custom-check-task") {
+        val t = task<ScriptedTask>("custom-check-task") {
             upToDateWhen { _, _ -> true }
             action {
                 runCount++
@@ -60,7 +60,7 @@ class UpToDateTest {
 
         var runCount = 0
 
-        val t = task<DefaultTask>("hash-check-task") {
+        val t = task<ScriptedTask>("hash-check-task") {
             inputs.file(tempDir.relativize(input).toString())
             trackedOutputs.file(tempDir.relativize(output).toString())
             action {
@@ -106,7 +106,7 @@ class UpToDateTest {
     fun testPropertyMatches(@TempDir tempDir: Path) = runBlocking {
         var runCount = 0
         var propVal = "v1"
-        val t = task<DefaultTask>("prop-task") {
+        val t = task<ScriptedTask>("prop-task") {
             upToDateWhenPropertyMatches("testProp") { propVal }
             action {
                 runCount++
@@ -137,7 +137,7 @@ class UpToDateTest {
         Files.writeString(customFile, "content1")
 
         var runCount = 0
-        val t = task<DefaultTask>("custom-files-task") {
+        val t = task<ScriptedTask>("custom-files-task") {
             upToDateWhenFilesMatch("custom.txt")
             action {
                 runCount++
@@ -170,7 +170,7 @@ class UpToDateTest {
         Files.writeString(output, "out")
 
         var runCount = 0
-        val t = task<DefaultTask>("newer-task") {
+        val t = task<ScriptedTask>("newer-task") {
             inputs.file(tempDir.relativize(input).toString())
             trackedOutputs.file(tempDir.relativize(output).toString())
             upToDateWhenInputsNewerThanOutputs()
@@ -202,7 +202,7 @@ class UpToDateTest {
         System.clearProperty("kartographer.test.prop")
 
         var runCount = 0
-        val t = task<DefaultTask>("sys-prop-task") {
+        val t = task<ScriptedTask>("sys-prop-task") {
             trackSystemProperty("kartographer.test.prop")
             upToDateWhen { context, task ->
                 val helpers = io.kartographer.core.scheduler.UpToDateHelpers
@@ -264,7 +264,7 @@ class UpToDateTest {
         Files.writeString(input, "content")
 
         var runCount = 0
-        val t = task<DefaultTask>("always-run-task") {
+        val t = task<ScriptedTask>("always-run-task") {
             inputs.file(tempDir.relativize(input).toString())
             trackedOutputs.file(tempDir.relativize(output).toString())
             alwaysRun()
@@ -296,7 +296,7 @@ class UpToDateTest {
         // producer's fresh results and must re-run alongside it.
         val consumerOut = tempDir.resolve("consumed.txt")
         var consumerRuns = 0
-        val consumer = task<DefaultTask>("dirty-consumer") {
+        val consumer = task<ScriptedTask>("dirty-consumer") {
             dependsOn(producer)
             trackedOutputs.file(tempDir.relativize(consumerOut).toString())
             action {
@@ -323,7 +323,7 @@ class UpToDateTest {
 
         // Always-run producer that happens to write identical bytes every time.
         var producerRuns = 0
-        val producer = task<DefaultTask>("stable-producer") {
+        val producer = task<ScriptedTask>("stable-producer") {
             alwaysRun()
             action {
                 producerRuns++
@@ -332,7 +332,7 @@ class UpToDateTest {
             }
         }
         var consumerRuns = 0
-        val consumer = task<DefaultTask>("verifying-consumer") {
+        val consumer = task<ScriptedTask>("verifying-consumer") {
             dependsOn(producer)
             inputs.file(tempDir.relativize(data).toString())
             trackedOutputs.file(tempDir.relativize(report).toString())

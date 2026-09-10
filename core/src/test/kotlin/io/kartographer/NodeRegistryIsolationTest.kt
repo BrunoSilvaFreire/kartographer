@@ -6,7 +6,7 @@ import io.kartographer.dsl.ProjectConfig
 import io.kartographer.dsl.TaskRegistry
 import io.kartographer.dsl.project
 import io.kartographer.dsl.task
-import io.kartographer.tasks.DefaultTask
+import io.kartographer.testing.ScriptedTask
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -29,7 +29,7 @@ class NodeRegistryIsolationTest {
         val registry = NodeRegistry()
 
         TaskRegistry.withRegistry(registry) {
-            task<DefaultTask>("scoped") { }
+            task<ScriptedTask>("scoped") { }
         }
 
         assertTrue(registry.nodes.containsKey(TaskId("scoped")))
@@ -41,7 +41,7 @@ class NodeRegistryIsolationTest {
         val registry = NodeRegistry()
 
         TaskRegistry.withRegistry(registry) { }
-        task<DefaultTask>("after") { }
+        task<ScriptedTask>("after") { }
 
         assertTrue(TaskRegistry.nodes.containsKey(TaskId("after")))
         assertTrue(registry.nodes.isEmpty())
@@ -73,7 +73,7 @@ class NodeRegistryIsolationTest {
             Thread {
                 try {
                     TaskRegistry.withRegistry(registry) {
-                        task<DefaultTask>(name) { }
+                        task<ScriptedTask>(name) { }
                         bothBound.countDown()
                         check(bothBound.await(5, TimeUnit.SECONDS)) { "peer thread never bound" }
                         assertEquals(setOf(TaskId(name)), registry.nodes.keys)

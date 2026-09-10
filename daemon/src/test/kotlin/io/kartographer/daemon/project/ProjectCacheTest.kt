@@ -13,7 +13,7 @@ class ProjectCacheTest {
 
     private fun writeScript(dir: File, vararg taskNames: String): File {
         val script = File(dir, "karto.kts")
-        script.writeText(taskNames.joinToString("\n") { """task<DefaultTask>("$it") { }""" })
+        script.writeText(taskNames.joinToString("\n") { """task<ScriptedTask>("$it") { }""" })
         return script
     }
 
@@ -38,7 +38,7 @@ class ProjectCacheTest {
 
         // Bump mtime explicitly: a same-second rewrite can otherwise land on the same
         // timestamp and make this pass for the wrong reason.
-        script.writeText("""task<DefaultTask>("build") { }""" + "\n" + """task<DefaultTask>("test") { }""")
+        script.writeText("""task<ScriptedTask>("build") { }""" + "\n" + """task<ScriptedTask>("test") { }""")
         script.setLastModified(script.lastModified() + 2000)
 
         val second = cache.use(dir, null) { it }

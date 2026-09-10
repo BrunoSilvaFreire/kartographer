@@ -3,7 +3,7 @@ package io.kartographer.daemon
 import io.kartographer.core.*
 import io.kartographer.core.model.*
 import io.kartographer.core.scheduler.RemoteWorkerClient
-import io.kartographer.tasks.DefaultTask
+import io.kartographer.testing.ScriptedTask
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test

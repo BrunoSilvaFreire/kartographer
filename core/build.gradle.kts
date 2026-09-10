@@ -5,6 +5,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
     id("com.google.protobuf")
     `java-library`
+    `java-test-fixtures`
 }
 
 repositories {

@@ -6,7 +6,7 @@ import io.cucumber.java.en.When
 import io.cucumber.java.en.Then
 import io.kartographer.core.model.*
 import io.kartographer.core.scheduler.TaskStateStore
-import io.kartographer.tasks.DefaultTask
+import io.kartographer.testing.ScriptedTask
 import io.kartographer.daemon.project.KtsPipelineLoader
 import java.nio.file.Files
 import java.nio.file.Path

@@ -1,5 +1,5 @@
-import io.kartographer.tasks.DefaultTask
+import io.kartographer.testing.ScriptedTask
 
-task<DefaultTask>("simple-task") {
+task<ScriptedTask>("simple-task") {
     action {}
 }

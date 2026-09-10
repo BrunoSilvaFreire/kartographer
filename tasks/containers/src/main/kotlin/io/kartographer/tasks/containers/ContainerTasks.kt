@@ -3,6 +3,7 @@ package io.kartographer.tasks.containers
 import io.kartographer.core.model.ExecutionContext
 import io.kartographer.core.model.ExecutionResult
 import io.kartographer.core.model.InputSet
+import io.kartographer.core.model.NoOutputs
 import io.kartographer.core.model.OutputSet
 import io.kartographer.core.model.Task
 import io.kartographer.core.model.executeBash
@@ -184,6 +185,127 @@ open class ContainerPush(name: String) : Task<ContainerPushInputs, ContainerPush
             is ExecutionResult.Failure -> failure(pushResult.error, pushResult.exitCode)
             else -> success { pushedRef.set(fullRef) }
         }
+    }
+}
+
+data class ContainerRunInputs(
+    var containerClient: ContainerClient,
+    var image: String,
+    var remove: Boolean,
+    var interactive: Boolean,
+    var ports: List<String>,
+    var volumes: List<String>,
+    var entrypoint: String?,
+    var args: List<String>,
+    var environment: Map<String, String>
+) : InputSet()
+
+class ContainerRun(name: String) : Task<ContainerRunInputs, NoOutputs>(name) {
+    val containerClient = property<ContainerClient> { set(ContainerClient.DOCKER) }
+    val image = property<String>()
+    var remove = true
+    var interactive = false
+    val ports = mutableListOf<String>()
+    val volumes = mutableListOf<String>()
+    var entrypoint: String? = null
+    val args = mutableListOf<String>()
+    val environment = mutableMapOf<String, String>()
+
+    override val requiresElevation: Boolean get() = containerClient.directOrNull()?.rootful ?: false
+    init { alwaysRun() }
+
+    override suspend fun buildInputs(context: ExecutionContext) = ContainerRunInputs(
+        containerClient.get(), image.get(), remove, interactive, ports.toList(), volumes.toList(),
+        entrypoint, args.toList(), environment.toMap()
+    )
+    override fun buildOutputs() = NoOutputs()
+    override suspend fun execute(context: ExecutionContext, inputSet: ContainerRunInputs) = context.executeBash {
+        requiresElevation = inputSet.containerClient.rootful
+        command(inputSet.containerClient.command)
+        args("run")
+        if (inputSet.remove) args("--rm")
+        if (inputSet.interactive) args("-it")
+        inputSet.ports.forEach { args("-p", it) }
+        inputSet.volumes.forEach { args("-v", it) }
+        inputSet.entrypoint?.let { args("--entrypoint", it) }
+        inputSet.environment.forEach { (key, value) -> args("-e", "$key=$value") }
+        args(inputSet.image)
+        args(inputSet.args)
+    }
+}
+
+data class ContainerComposeInputs(
+    var containerClient: ContainerClient,
+    var files: List<String>,
+    var services: List<String>,
+    var build: Boolean,
+    var wait: Boolean,
+    var workingDir: String?,
+    var environment: Map<String, String>
+) : InputSet()
+
+abstract class ContainerComposeTask(name: String) : Task<ContainerComposeInputs, NoOutputs>(name) {
+    val containerClient = property<ContainerClient> { set(ContainerClient.DOCKER) }
+    val files = mutableListOf<String>()
+    val services = mutableListOf<String>()
+    var build = false
+    var wait = false
+    var workingDir: String? = null
+    val environment = mutableMapOf<String, String>()
+    protected abstract val commandName: String
+    protected open val detached: Boolean = false
+
+    override val requiresElevation: Boolean get() = containerClient.directOrNull()?.rootful ?: false
+    init { alwaysRun() }
+
+    override suspend fun buildInputs(context: ExecutionContext) = ContainerComposeInputs(
+        containerClient.get(), files.toList(), services.toList(), build, wait, workingDir,
+        environment.toMap()
+    )
+    override fun buildOutputs() = NoOutputs()
+    override suspend fun execute(context: ExecutionContext, inputSet: ContainerComposeInputs) = context.executeBash {
+        requiresElevation = inputSet.containerClient.rootful
+        command(inputSet.containerClient.command)
+        args("compose")
+        inputSet.files.forEach { args("-f", it) }
+        args(commandName)
+        if (detached) args("-d")
+        if (inputSet.build) args("--build")
+        if (inputSet.wait) args("--wait")
+        args(inputSet.services)
+        inputSet.workingDir?.let { workingDir = it }
+        environment.putAll(inputSet.environment)
+    }
+}
+
+class ContainerComposeUp(name: String) : ContainerComposeTask(name) {
+    override val commandName = "up"
+    override val detached = true
+}
+class ContainerComposeDown(name: String) : ContainerComposeTask(name) { override val commandName = "down" }
+class ContainerComposePs(name: String) : ContainerComposeTask(name) { override val commandName = "ps" }
+
+data class ContainerImagesInputs(var containerClient: ContainerClient, var images: List<String>) : InputSet()
+
+class ContainerRemoveImages(name: String) : Task<ContainerImagesInputs, NoOutputs>(name) {
+    val containerClient = property<ContainerClient> { set(ContainerClient.DOCKER) }
+    val images = mutableListOf<String>()
+    init { alwaysRun() }
+    override suspend fun buildInputs(context: ExecutionContext) = ContainerImagesInputs(containerClient.get(), images.toList())
+    override fun buildOutputs() = NoOutputs()
+    override suspend fun execute(context: ExecutionContext, inputSet: ContainerImagesInputs) = context.executeBash {
+        command(inputSet.containerClient.command); args("rmi", "--force"); args(inputSet.images)
+    }
+}
+
+class ContainerListImages(name: String) : Task<ContainerImagesInputs, NoOutputs>(name) {
+    val containerClient = property<ContainerClient> { set(ContainerClient.DOCKER) }
+    val images = mutableListOf<String>()
+    init { alwaysRun() }
+    override suspend fun buildInputs(context: ExecutionContext) = ContainerImagesInputs(containerClient.get(), images.toList())
+    override fun buildOutputs() = NoOutputs()
+    override suspend fun execute(context: ExecutionContext, inputSet: ContainerImagesInputs) = context.executeBash {
+        command(inputSet.containerClient.command); args("images"); args(inputSet.images)
     }
 }
 

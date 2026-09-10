@@ -1,6 +1,6 @@
 package io.kartographer
 
-import io.kartographer.tasks.DefaultTask
+import io.kartographer.testing.ScriptedTask
 
 import io.kartographer.core.*
 import io.kartographer.core.model.*
@@ -24,11 +24,11 @@ class KartographerTest {
 
     @Test
     fun testTopologicalOrdering() {
-        val c = task<DefaultTask>("C") { }
-        val b = task<DefaultTask>("B") {
+        val c = task<ScriptedTask>("C") { }
+        val b = task<ScriptedTask>("B") {
             dependsOn(c)
         }
-        val a = task<DefaultTask>("A") {
+        val a = task<ScriptedTask>("A") {
             dependsOn(b)
         }
 
@@ -43,8 +43,8 @@ class KartographerTest {
 
     @Test
     fun testCycleDetection() {
-        val a = task<DefaultTask>("A") { }
-        val b = task<DefaultTask>("B") {
+        val a = task<ScriptedTask>("A") { }
+        val b = task<ScriptedTask>("B") {
             dependsOn(a)
         }
         // Force cycle B -> A -> B
@@ -59,7 +59,7 @@ class KartographerTest {
 
     @Test
     fun testMissingDependencyDetection() {
-        task<DefaultTask>("A") {
+        task<ScriptedTask>("A") {
             dependsOn("nonexistent")
         }
 
@@ -72,7 +72,7 @@ class KartographerTest {
 
     @Test
     fun testLocalCommandSuccess() = runBlocking {
-        val task = task<DefaultTask>("successTask") {
+        val task = task<ScriptedTask>("successTask") {
             action { context ->
                 context.executeBash {
                     command("echo")
@@ -93,7 +93,7 @@ class KartographerTest {
 
     @Test
     fun testLocalCommandFailure() = runBlocking {
-        val task = task<DefaultTask>("failureTask") {
+        val task = task<ScriptedTask>("failureTask") {
             action { context ->
                 context.executeBash {
                     command("exit")
@@ -116,12 +116,12 @@ class KartographerTest {
 
     @Test
     fun testDSLBuildsExpectedTaskGraph() {
-        val first = task<DefaultTask>("first") {
+        val first = task<ScriptedTask>("first") {
             inputs.file("src/main.kt")
             trackedOutputs.dir("build/out")
         }
 
-        val second = task<DefaultTask>("second") {
+        val second = task<ScriptedTask>("second") {
             dependsOn(first)
             dependsOn("non-existent-yet")
         }
@@ -138,7 +138,7 @@ class KartographerTest {
 
     @Test
     fun testTopologyRequirementModelPreserved() {
-        val t = task<DefaultTask>("topologyTask") {
+        val t = task<ScriptedTask>("topologyTask") {
             topology {
                 localOnly()
                 requires("arch", "amd64")

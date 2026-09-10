@@ -41,7 +41,7 @@ class LocalProtocolServerTest {
 
     private fun writeProject(dir: File, vararg tasks: String) {
         File(dir, "karto.kts").writeText(
-            tasks.joinToString("\n") { """task<DefaultTask>("$it") { }""" }
+            tasks.joinToString("\n") { """task<ScriptedTask>("$it") { }""" }
         )
     }
 
@@ -94,7 +94,7 @@ class LocalProtocolServerTest {
         val socket = startServer(dir)
         File(dir, "karto.kts").writeText(
             """
-            task<DefaultTask>("boom") {
+            task<ScriptedTask>("boom") {
                 action { context ->
                     context.executeBash { command("sh"); args("-c", "exit 7") }
                 }
@@ -135,7 +135,7 @@ class LocalProtocolServerTest {
         val socket = startServer(dir)
         File(dir, "karto.kts").writeText(
             """
-            task<DefaultTask>("talk") {
+            task<ScriptedTask>("talk") {
                 action { context ->
                     context.executeBash { command("sh"); args("-c", "echo hello-from-task") }
                 }
@@ -193,7 +193,7 @@ class LocalProtocolServerTest {
         val socket = startServer(dir)
         File(dir, "karto.kts").writeText(
             """
-            task<DefaultTask>("interactive") {
+            task<ScriptedTask>("interactive") {
                 action { context ->
                     context.executeBash { command("sh"); args("-c", "read line; echo received-${'$'}{'$'}line") }
                 }

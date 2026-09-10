@@ -1,6 +1,6 @@
-import io.kartographer.tasks.DefaultTask
+import io.kartographer.testing.ScriptedTask
 
-task<DefaultTask>("state-task") {
+task<ScriptedTask>("state-task") {
     inputs.file("in.txt")
     trackedOutputs.file("out.txt")
 }

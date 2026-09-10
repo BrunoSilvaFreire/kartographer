@@ -4,7 +4,7 @@ import io.cucumber.java.en.Given
 import io.cucumber.java.en.When
 import io.cucumber.java.en.Then
 import io.kartographer.core.model.*
-import io.kartographer.tasks.DefaultTask
+import io.kartographer.testing.ScriptedTask
 import io.kartographer.daemon.project.KtsPipelineLoader
 import kotlinx.coroutines.runBlocking
 import java.nio.file.Files
@@ -41,7 +41,7 @@ class ExecSpecValidationStepDefinitions {
 
     @Given("we configure task {string} with args:")
     fun given_configure_task_args(name: String, argsTable: List<String>) {
-        val task = tasks[TaskId(name)] as? DefaultTask ?: throw IllegalArgumentException("Task $name not found")
+        val task = tasks[TaskId(name)] as? ScriptedTask ?: throw IllegalArgumentException("Task $name not found")
         task.action { ctx ->
             ctx.executeBash {
                 command("echo")
@@ -52,7 +52,7 @@ class ExecSpecValidationStepDefinitions {
 
     @Given("we configure task {string} with env {string} set to {string}")
     fun given_configure_task_env(name: String, key: String, value: String) {
-        val task = tasks[TaskId(name)] as? DefaultTask ?: throw IllegalArgumentException("Task $name not found")
+        val task = tasks[TaskId(name)] as? ScriptedTask ?: throw IllegalArgumentException("Task $name not found")
         task.action { ctx ->
             ctx.executeBash {
                 command("echo")
@@ -63,7 +63,7 @@ class ExecSpecValidationStepDefinitions {
 
     @Given("we configure task {string} to require elevation")
     fun given_configure_task_elevation(name: String) {
-        val task = tasks[TaskId(name)] as? DefaultTask ?: throw IllegalArgumentException("Task $name not found")
+        val task = tasks[TaskId(name)] as? ScriptedTask ?: throw IllegalArgumentException("Task $name not found")
         task.action { ctx ->
             ctx.executeBash {
                 requiresElevation = true
@@ -79,7 +79,7 @@ class ExecSpecValidationStepDefinitions {
 
     @When("we dry-run the custom task {string}")
     fun when_dry_run_custom(name: String) = runBlocking {
-        val task = tasks[TaskId(name)] as? DefaultTask ?: throw IllegalArgumentException("Task $name not found")
+        val task = tasks[TaskId(name)] as? ScriptedTask ?: throw IllegalArgumentException("Task $name not found")
         val context = ExecutionContext(
             projectDir = projectDir ?: Files.createTempDirectory("karto-escaping-test"),
             worker = Worker(WorkerId("test-worker")),
@@ -114,7 +114,7 @@ class ExecSpecValidationStepDefinitions {
 
     @Given("we configure task {string} to throw an exception")
     fun given_configure_task_throws(name: String) {
-        val task = tasks[TaskId(name)] as? DefaultTask ?: throw IllegalArgumentException("Task $name not found")
+        val task = tasks[TaskId(name)] as? ScriptedTask ?: throw IllegalArgumentException("Task $name not found")
         task.action {
             throw RuntimeException("Simulated exception")
         }
