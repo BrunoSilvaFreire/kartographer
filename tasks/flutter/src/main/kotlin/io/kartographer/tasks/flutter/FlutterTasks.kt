@@ -13,6 +13,8 @@ import io.kartographer.core.model.file
 import io.kartographer.core.model.executeBash
 import io.kartographer.core.model.emitOutput
 import java.io.File
+import java.io.FileOutputStream
+import java.io.PrintWriter
 
 data class FlutterRunInputs(
     var device: String,
@@ -204,13 +206,15 @@ data class FlutterTestInputs(
     var mergeCoverage: Boolean,
     var coveragePackage: String?,
     var reportDir: String?,
+    var reportName: String? = null,
     var jsonReport: Boolean,
     var generateJunit: Boolean,
     var reporter: String?,
     var ignoreFailures: Boolean,
     var isolateTargets: Boolean,
     var cacheable: Boolean,
-    var generateHtml: Boolean = false,
+    var generateHtml: Boolean = true,
+    var logFile: Boolean = true,
     var args: List<String>
 ) : InputSet()
 
@@ -223,6 +227,8 @@ class FlutterTestOutputs : OutputSet() {
     val success = output<Boolean>("success")
     val jsonReportPath = output<String>("jsonReportPath")
     val junitReportPath = output<String>("junitReportPath")
+    val htmlReportPath = output<String>("htmlReportPath")
+    val logPath = output<String>("logPath")
     val failureSummary = output<String>("failureSummary")
     val coveragePercent = output<Double>("coveragePercent")
     val coverageLcov = output<String>("coverageLcov")
@@ -286,6 +292,7 @@ open class FlutterTest(name: String) : Task<FlutterTestInputs, FlutterTestOutput
     val coveragePackage = property<String>()
 
     val reportDir = property<String> { set("build/test-results") }
+    val reportName = property<String>()
     val jsonReport = property<Boolean> { set(true) }
     val generateJunit = property<Boolean> { set(true) }
     val reporter = property<String>()
@@ -294,7 +301,8 @@ open class FlutterTest(name: String) : Task<FlutterTestInputs, FlutterTestOutput
     val isolateTargets = property<Boolean> { set(false) }
     val cacheable = property<Boolean> { set(false) }
     val generateHtml = property<Boolean> { set(false) }
-        .withCLI("html", "Generate HTML coverage report") { completeWith("true", "false") }
+        .withCLI("html", "Generate HTML test report") { completeWith("true", "false") }
+    val logFile = property<Boolean> { set(false) }
 
     val args = mutableListOf<String>()
     fun arg(vararg arguments: String) { args.addAll(arguments) }
@@ -349,6 +357,7 @@ open class FlutterTest(name: String) : Task<FlutterTestInputs, FlutterTestOutput
             mergeCoverage = mergeCoverage.get(),
             coveragePackage = coveragePackage.orNull(),
             reportDir = reportDir.orNull(),
+            reportName = reportName.orNull(),
             jsonReport = jsonReport.get(),
             generateJunit = generateJunit.get(),
             reporter = reporter.orNull(),
@@ -356,6 +365,7 @@ open class FlutterTest(name: String) : Task<FlutterTestInputs, FlutterTestOutput
             isolateTargets = isolateTargets.get(),
             cacheable = cacheable.get(),
             generateHtml = generateHtml.get(),
+            logFile = logFile.get(),
             args = args.toList()
         )
     }
@@ -384,105 +394,126 @@ open class FlutterTest(name: String) : Task<FlutterTestInputs, FlutterTestOutput
         }
 
         val repDirName = inputSet.reportDir ?: "build/test-results"
-        val resolvedReportDir = File(projectDir, repDirName).apply { mkdirs() }
-        val mainJsonFile = File(resolvedReportDir, "$name.json")
-        val junitFile = File(resolvedReportDir, "$name.xml")
+        val resolvedReportDir = if (File(repDirName).isAbsolute) File(repDirName) else File(projectDir, repDirName)
+        resolvedReportDir.mkdirs()
+
+        val baseReportName = inputSet.reportName ?: name.substringAfterLast('/')
+        val mainJsonFile = File(resolvedReportDir, "$baseReportName.json")
+        val junitFile = File(resolvedReportDir, "$baseReportName.xml")
+        val htmlFile = File(resolvedReportDir, "$baseReportName.html")
+        val taskLogFile = File(resolvedReportDir, "$baseReportName.log")
+
+        val logWriter = if (inputSet.logFile) {
+            taskLogFile.writeText("")
+            PrintWriter(FileOutputStream(taskLogFile, true), true)
+        } else null
 
         val configPath = inputSet.config?.let {
             if (it.endsWith(".yaml")) it else "config/$it.yaml"
         }
 
-        if (inputSet.isolateTargets) {
-            val testFiles = resolveTestFiles(projectDir, inputSet.targets)
-            val summaries = mutableListOf<FlutterTestRunSummary>()
-            val combinedJsonLines = mutableListOf<String>()
-            var firstFailure: ExecutionResult.Failure<*>? = null
+        try {
+            if (inputSet.isolateTargets) {
+                val testFiles = resolveTestFiles(projectDir, inputSet.targets)
+                val summaries = mutableListOf<FlutterTestRunSummary>()
+                val combinedJsonLines = mutableListOf<String>()
+                var firstFailure: ExecutionResult.Failure<*>? = null
 
-            for ((idx, testFile) in testFiles.withIndex()) {
-                val relPath = testFile.relativeTo(projectDir).path
-                val targetJson = File(resolvedReportDir, "${name}_${idx}_${testFile.nameWithoutExtension}.json")
+                for ((idx, testFile) in testFiles.withIndex()) {
+                    val relPath = testFile.relativeTo(projectDir).path
+                    val targetJson = File(resolvedReportDir, "${baseReportName}_${idx}_${testFile.nameWithoutExtension}.json")
 
+                    val result = context.executeBash {
+                        command(inputSet.flutterBin)
+                        args("test")
+                        args(inputSet.args)
+                        args(relPath)
+                        if (inputSet.jsonReport) {
+                            args("--file-reporter", "json:${targetJson.absolutePath}")
+                        }
+                        appendFlags(this, inputSet, configPath)
+                        onStdoutLine = { line -> logWriter?.println(line) }
+                        onStderrLine = { line -> logWriter?.println(line) }
+                    }
+
+                    if (result is ExecutionResult.Failure && firstFailure == null) {
+                        firstFailure = result
+                    }
+
+                    if (targetJson.exists()) {
+                        combinedJsonLines.addAll(targetJson.readLines())
+                        val sum = FlutterTestReportParser.parseJsonReport(targetJson)
+                        summaries.add(sum)
+                    }
+                    if (inputSet.failFast && (summaries.lastOrNull()?.failedCount ?: 0) > 0) {
+                        break
+                    }
+                }
+
+                if (combinedJsonLines.isNotEmpty()) {
+                    mainJsonFile.writeText(combinedJsonLines.joinToString("\n"))
+                }
+
+                val combinedSummary = FlutterTestReportParser.combineSummaries(summaries)
+                if (inputSet.generateJunit) {
+                    FlutterTestReportParser.generateJUnitXml(combinedSummary, name, junitFile)
+                }
+
+                return populateOutputsAndReturn(
+                    context, outputs, combinedSummary, mainJsonFile, junitFile, htmlFile, taskLogFile, resolvedReportDir, inputSet, projectDir, firstFailure
+                )
+            } else {
                 val result = context.executeBash {
                     command(inputSet.flutterBin)
                     args("test")
                     args(inputSet.args)
-                    args(relPath)
+                    if (inputSet.targets.isNotEmpty()) {
+                        args(inputSet.targets)
+                    }
                     if (inputSet.jsonReport) {
-                        args("--file-reporter", "json:${targetJson.absolutePath}")
+                        args("--file-reporter", "json:${mainJsonFile.absolutePath}")
                     }
                     appendFlags(this, inputSet, configPath)
-                }
 
-                if (result is ExecutionResult.Failure && firstFailure == null) {
-                    firstFailure = result
-                }
-
-                if (targetJson.exists()) {
-                    combinedJsonLines.addAll(targetJson.readLines())
-                    val sum = FlutterTestReportParser.parseJsonReport(targetJson)
-                    summaries.add(sum)
-                }
-                if (inputSet.failFast && (summaries.lastOrNull()?.failedCount ?: 0) > 0) {
-                    break
-                }
-            }
-
-            if (combinedJsonLines.isNotEmpty()) {
-                mainJsonFile.writeText(combinedJsonLines.joinToString("\n"))
-            }
-
-            val combinedSummary = FlutterTestReportParser.combineSummaries(summaries)
-            if (inputSet.generateJunit) {
-                FlutterTestReportParser.generateJUnitXml(combinedSummary, name, junitFile)
-            }
-
-            return populateOutputsAndReturn(
-                context, outputs, combinedSummary, mainJsonFile, junitFile, inputSet, projectDir, firstFailure
-            )
-        } else {
-            val result = context.executeBash {
-                command(inputSet.flutterBin)
-                args("test")
-                args(inputSet.args)
-                if (inputSet.targets.isNotEmpty()) {
-                    args(inputSet.targets)
-                }
-                if (inputSet.jsonReport) {
-                    args("--file-reporter", "json:${mainJsonFile.absolutePath}")
-                }
-                appendFlags(this, inputSet, configPath)
-
-                onStdoutLine = { line ->
-                    if (inputSet.startPaused) {
-                        val endpoints = parseFlutterEndpoints(line)
-                        endpoints.debugEndpoint?.let { context.emitOutput(outputs.debugEndpoint, it) }
-                        endpoints.vmServiceUri?.let { context.emitOutput(outputs.vmServiceUri, it) }
-                        endpoints.devToolsUri?.let { context.emitOutput(outputs.devToolsUri, it) }
+                    onStdoutLine = { line ->
+                        logWriter?.println(line)
+                        if (inputSet.startPaused) {
+                            val endpoints = parseFlutterEndpoints(line)
+                            endpoints.debugEndpoint?.let { context.emitOutput(outputs.debugEndpoint, it) }
+                            endpoints.vmServiceUri?.let { context.emitOutput(outputs.vmServiceUri, it) }
+                            endpoints.devToolsUri?.let { context.emitOutput(outputs.devToolsUri, it) }
+                        }
+                    }
+                    onStderrLine = { line ->
+                        logWriter?.println(line)
                     }
                 }
-            }
 
-            val summary = if (mainJsonFile.exists()) {
-                FlutterTestReportParser.parseJsonReport(mainJsonFile)
-            } else {
-                FlutterTestRunSummary(
-                    totalCount = 0,
-                    passedCount = 0,
-                    failedCount = if (result is ExecutionResult.Failure) 1 else 0,
-                    skippedCount = 0,
-                    durationMs = 0L,
-                    success = result is ExecutionResult.Success,
-                    testCases = emptyList()
+                val summary = if (mainJsonFile.exists()) {
+                    FlutterTestReportParser.parseJsonReport(mainJsonFile)
+                } else {
+                    FlutterTestRunSummary(
+                        totalCount = 0,
+                        passedCount = 0,
+                        failedCount = if (result is ExecutionResult.Failure) 1 else 0,
+                        skippedCount = 0,
+                        durationMs = 0L,
+                        success = result is ExecutionResult.Success,
+                        testCases = emptyList()
+                    )
+                }
+
+                if (inputSet.generateJunit) {
+                    FlutterTestReportParser.generateJUnitXml(summary, name, junitFile)
+                }
+
+                return populateOutputsAndReturn(
+                    context, outputs, summary, mainJsonFile, junitFile, htmlFile, taskLogFile, resolvedReportDir, inputSet, projectDir, result as? ExecutionResult.Failure
                 )
             }
-
-            if (inputSet.generateJunit) {
-                FlutterTestReportParser.generateJUnitXml(summary, name, junitFile)
-            }
-
-            return populateOutputsAndReturn(
-                context, outputs, summary, mainJsonFile, junitFile, inputSet, projectDir, result as? ExecutionResult.Failure
-            )
+        } finally {
+            logWriter?.flush()
+            logWriter?.close()
         }
     }
 
@@ -561,6 +592,9 @@ open class FlutterTest(name: String) : Task<FlutterTestInputs, FlutterTestOutput
         summary: FlutterTestRunSummary,
         mainJsonFile: File,
         junitFile: File,
+        htmlFile: File,
+        taskLogFile: File,
+        resolvedReportDir: File,
         inputSet: FlutterTestInputs,
         projectDir: File,
         bashFailure: ExecutionResult.Failure<*>? = null
@@ -587,28 +621,32 @@ open class FlutterTest(name: String) : Task<FlutterTestInputs, FlutterTestOutput
         }
 
         if (inputSet.coverage) {
-            val lcovPath = inputSet.coveragePath ?: "coverage/lcov.info"
-            val lcovFile = File(projectDir, lcovPath)
+            val lcovFile = inputSet.coveragePath?.let {
+                val f = File(it)
+                if (f.isAbsolute) f else File(projectDir, it)
+            } ?: File(resolvedReportDir, "lcov.info")
             val lcovSummary = FlutterTestReportParser.parseLcovCoverage(lcovFile)
             if (lcovSummary != null) {
                 context.emitOutput(outputs.coveragePercent, lcovSummary.coveragePercent)
+            }
+            if (lcovFile.exists()) {
                 context.emitOutput(outputs.coverageLcov, lcovFile.relativeTo(projectDir).path)
             }
         }
 
-        val hasFailed = !summary.success || (bashFailure != null) || summary.failedCount > 0
-        if (!hasFailed && inputSet.generateHtml) {
-            val lcovPath = inputSet.coveragePath ?: "coverage/lcov.info"
-            val lcovFile = File(projectDir, lcovPath)
-            if (lcovFile.exists()) {
-                val htmlDir = File(lcovFile.parentFile, "html")
-                context.executeBash {
-                    command("genhtml")
-                    args(lcovFile.absolutePath, "-o", htmlDir.absolutePath)
-                }
-            }
+        if (inputSet.generateHtml && junitFile.exists()) {
+            FlutterTestReportParser.generateHtmlReport(context, junitFile, htmlFile, name)
+        }
+        if (htmlFile.exists()) {
+            val relHtml = htmlFile.relativeTo(projectDir).path
+            context.emitOutput(outputs.htmlReportPath, relHtml)
+        }
+        if (taskLogFile.exists()) {
+            val relLog = taskLogFile.relativeTo(projectDir).path
+            context.emitOutput(outputs.logPath, relLog)
         }
 
+        val hasFailed = !summary.success || (bashFailure != null) || summary.failedCount > 0
         if (hasFailed && !inputSet.ignoreFailures) {
             val msg = if (summary.failedCount > 0) {
                 "Flutter test task '$name' failed: ${summary.failedCount} of ${summary.totalCount} tests failed."

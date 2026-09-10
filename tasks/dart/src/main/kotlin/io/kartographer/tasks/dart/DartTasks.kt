@@ -9,10 +9,13 @@ import io.kartographer.core.model.NoOutputs
 import io.kartographer.core.model.OutputSet
 import io.kartographer.core.model.Task
 import io.kartographer.core.Provider
+import io.kartographer.core.model.emitOutput
 import io.kartographer.core.model.executeBash
 import io.kartographer.core.model.executeSpec
 import io.kartographer.core.providers.providerOf
 import java.io.File
+import java.io.FileOutputStream
+import java.io.PrintWriter
 
 /**
  * Plain Dart — not Flutter.
@@ -163,10 +166,32 @@ data class DartTestInputs(
     var coverage: Boolean = false,
     var coveragePath: String? = null,
     var reportDir: String? = null,
-    var generateHtml: Boolean = false,
+    var reportName: String? = null,
+    var jsonReport: Boolean = true,
+    var generateJunit: Boolean = true,
+    var generateHtml: Boolean = true,
+    var logFile: Boolean = true,
+    var ignoreFailures: Boolean = false,
+    var failFast: Boolean = false,
 ) : InputSet()
 
-open class DartTest(name: String) : DartTask<DartTestInputs, NoOutputs>(name) {
+class DartTestOutputs : OutputSet() {
+    val totalCount = output<Int>("totalCount")
+    val passedCount = output<Int>("passedCount")
+    val failedCount = output<Int>("failedCount")
+    val skippedCount = output<Int>("skippedCount")
+    val durationMs = output<Long>("durationMs")
+    val success = output<Boolean>("success")
+    val jsonReportPath = output<String>("jsonReportPath")
+    val junitReportPath = output<String>("junitReportPath")
+    val htmlReportPath = output<String>("htmlReportPath")
+    val logPath = output<String>("logPath")
+    val failureSummary = output<String>("failureSummary")
+    val coveragePercent = output<Double>("coveragePercent")
+    val coverageLcov = output<String>("coverageLcov")
+}
+
+open class DartTest(name: String) : DartTask<DartTestInputs, DartTestOutputs>(name) {
     val target = property<String>()
         .withCLI("target", "Specific test file or directory to run")
     val targets = property<List<String>> { set(emptyList()) }
@@ -189,8 +214,14 @@ open class DartTest(name: String) : DartTask<DartTestInputs, NoOutputs>(name) {
     val coveragePath = property<String>()
         .withCLI("coverage-path", "Where to write the LCOV coverage file")
     val reportDir = property<String> { set("build/test-results") }
+    val reportName = property<String>()
+    val jsonReport = property<Boolean> { set(false) }
+    val generateJunit = property<Boolean> { set(false) }
     val generateHtml = property<Boolean> { set(false) }
-        .withCLI("html", "Generate HTML coverage report") { completeWith("true", "false") }
+        .withCLI("html", "Generate HTML test report") { completeWith("true", "false") }
+    val logFile = property<Boolean> { set(false) }
+    val ignoreFailures = property<Boolean> { set(false) }
+    val failFast = property<Boolean> { set(false) }
 
     val args = mutableListOf<String>()
     fun arg(vararg arguments: String) { args.addAll(arguments) }
@@ -216,18 +247,26 @@ open class DartTest(name: String) : DartTask<DartTestInputs, NoOutputs>(name) {
             coverage = isCoverage,
             coveragePath = coveragePath.orNull(),
             reportDir = reportDir.orNull(),
+            reportName = reportName.orNull(),
+            jsonReport = jsonReport.get(),
+            generateJunit = generateJunit.get(),
             generateHtml = generateHtml.get(),
+            logFile = logFile.get(),
+            ignoreFailures = ignoreFailures.get(),
+            failFast = failFast.get(),
         )
     }
 
-    override fun buildOutputs() = NoOutputs()
+    override fun buildOutputs() = DartTestOutputs()
 
     override suspend fun execute(
         context: ExecutionContext,
         inputSet: DartTestInputs,
-    ): ExecutionResult<NoOutputs> {
+    ): ExecutionResult<DartTestOutputs> {
+        val outputs = buildOutputs()
+        val projectDir = context.projectDir.toFile()
         val pkgDir = inputSet.packageDir?.let { context.projectDir.resolve(it).toFile() }
-            ?: context.projectDir.toFile()
+            ?: projectDir
 
         if (inputSet.targets.isNotEmpty()) {
             val hasTests = inputSet.targets.any { targetPath ->
@@ -243,60 +282,142 @@ open class DartTest(name: String) : DartTask<DartTestInputs, NoOutputs>(name) {
                 val msg = "No tests found in ${inputSet.targets.joinToString(", ")} for package ${pkgDir.name}"
                 context.observer?.onEvent(ExecutionEvent.TaskOutput(this, msg, isError = false))
                 println(msg)
-                return ExecutionResult.Success(NoOutputs())
+                return ExecutionResult.Success(outputs)
             }
         }
 
-        val result = context.executeDart {
-            dartBin = inputSet.dartBin
-            command = "test"
-            inputSet.namePattern?.let { arg("--name", it) }
-            inputSet.plainName?.let { arg("--plain-name", it) }
-            inputSet.concurrency?.let { arg("--concurrency", it.toString()) }
-            inputSet.reporter?.let { arg("--reporter", it) }
-            arg(inputSet.args)
-            arg(inputSet.targets)
-            inputSet.packageDir?.let { workingDir = context.projectDir.resolve(it).toString() }
-            environment.putAll(inputSet.environment)
-        }
+        val repDirName = inputSet.reportDir ?: "build/test-results"
+        val resolvedReportDir = if (File(repDirName).isAbsolute) File(repDirName) else File(projectDir, repDirName)
+        resolvedReportDir.mkdirs()
 
-        if (result is ExecutionResult.Failure) {
-            return result
-        }
+        val baseReportName = inputSet.reportName ?: name.substringAfterLast('/')
+        val mainJsonFile = File(resolvedReportDir, "$baseReportName.json")
+        val junitFile = File(resolvedReportDir, "$baseReportName.xml")
+        val htmlFile = File(resolvedReportDir, "$baseReportName.html")
+        val taskLogFile = File(resolvedReportDir, "$baseReportName.log")
+        val lcovFile = inputSet.coveragePath?.let {
+            val f = File(it)
+            if (f.isAbsolute) f else File(projectDir, it)
+        } ?: File(resolvedReportDir, "lcov.info")
 
-        if (inputSet.coverage) {
-            val covDir = File(pkgDir, "coverage")
-            if (covDir.exists()) {
-                val outLcov = inputSet.coveragePath?.let {
-                    val f = File(it)
-                    if (f.isAbsolute) f else File(context.projectDir.toFile(), it)
-                } ?: File(pkgDir, "coverage/lcov.info")
+        val logWriter = if (inputSet.logFile) {
+            taskLogFile.writeText("")
+            PrintWriter(FileOutputStream(taskLogFile, true), true)
+        } else null
 
-                outLcov.parentFile?.mkdirs()
+        var testFailure: ExecutionResult.Failure<*>? = null
 
-                context.executeDart {
-                    dartBin = inputSet.dartBin
-                    command = "run"
-                    arg("coverage:format_coverage")
-                    arg("--lcov")
-                    arg("--in=coverage")
-                    arg("--out=${outLcov.absolutePath}")
-                    arg("--report-on=lib")
-                    workingDir = pkgDir.absolutePath
-                    environment.putAll(inputSet.environment)
+        try {
+            val result = context.executeDart {
+                dartBin = inputSet.dartBin
+                command = "test"
+                if (inputSet.jsonReport) {
+                    arg("--file-reporter", "json:${mainJsonFile.absolutePath}")
                 }
+                inputSet.namePattern?.let { arg("--name", it) }
+                inputSet.plainName?.let { arg("--plain-name", it) }
+                inputSet.concurrency?.let { arg("--concurrency", it.toString()) }
+                inputSet.reporter?.let { arg("--reporter", it) } ?: if (inputSet.jsonReport) arg("-r", "expanded") else Unit
+                if (inputSet.failFast) arg("--fail-fast")
+                arg(inputSet.args)
+                arg(inputSet.targets)
+                inputSet.packageDir?.let { workingDir = context.projectDir.resolve(it).toString() }
+                environment.putAll(inputSet.environment)
+                onStdoutLine = { line -> logWriter?.println(line) }
+                onStderrLine = { line -> logWriter?.println(line) }
+            }
+            if (result is ExecutionResult.Failure) {
+                testFailure = result
+            }
 
-                if (inputSet.generateHtml && outLcov.exists()) {
-                    val htmlDir = File(outLcov.parentFile, "html")
-                    context.executeBash {
-                        command("genhtml")
-                        args(outLcov.absolutePath, "-o", htmlDir.absolutePath)
+            if (inputSet.coverage) {
+                val covDir = File(pkgDir, "coverage")
+                if (covDir.exists()) {
+                    lcovFile.parentFile?.mkdirs()
+                    context.executeDart {
+                        dartBin = inputSet.dartBin
+                        command = "run"
+                        arg("coverage:format_coverage")
+                        arg("--lcov")
+                        arg("--in=coverage")
+                        arg("--out=${lcovFile.absolutePath}")
+                        arg("--report-on=lib")
+                        workingDir = pkgDir.absolutePath
+                        environment.putAll(inputSet.environment)
                     }
+                    covDir.deleteRecursively()
                 }
             }
+        } finally {
+            logWriter?.flush()
+            logWriter?.close()
         }
 
-        return result
+        val summary: DartTestRunSummary = if (mainJsonFile.exists() && mainJsonFile.length() > 0L) {
+            DartTestReportParser.parseJsonReport(mainJsonFile)
+        } else {
+            DartTestRunSummary(
+                totalCount = 0,
+                passedCount = 0,
+                failedCount = if (testFailure != null) 1 else 0,
+                skippedCount = 0,
+                durationMs = 0L,
+                success = testFailure == null,
+                testCases = emptyList()
+            )
+        }
+
+        if (inputSet.generateJunit) {
+            DartTestReportParser.generateJUnitXml(summary, name.replace('/', '.'), junitFile)
+        }
+
+        if (inputSet.generateHtml && junitFile.exists()) {
+            DartTestReportParser.generateHtmlReport(context, junitFile, htmlFile, name)
+        }
+
+        context.emitOutput(outputs.totalCount, summary.totalCount)
+        context.emitOutput(outputs.passedCount, summary.passedCount)
+        context.emitOutput(outputs.failedCount, summary.failedCount)
+        context.emitOutput(outputs.skippedCount, summary.skippedCount)
+        context.emitOutput(outputs.durationMs, summary.durationMs)
+        context.emitOutput(outputs.success, summary.success)
+
+        if (mainJsonFile.exists()) {
+            context.emitOutput(outputs.jsonReportPath, mainJsonFile.relativeTo(projectDir).path)
+        }
+        if (junitFile.exists()) {
+            context.emitOutput(outputs.junitReportPath, junitFile.relativeTo(projectDir).path)
+        }
+        if (htmlFile.exists()) {
+            context.emitOutput(outputs.htmlReportPath, htmlFile.relativeTo(projectDir).path)
+        }
+        if (taskLogFile.exists()) {
+            context.emitOutput(outputs.logPath, taskLogFile.relativeTo(projectDir).path)
+        }
+        if (lcovFile.exists()) {
+            val lcovSummary = DartTestReportParser.parseLcovCoverage(lcovFile)
+            if (lcovSummary != null) {
+                context.emitOutput(outputs.coveragePercent, lcovSummary.coveragePercent)
+            }
+            context.emitOutput(outputs.coverageLcov, lcovFile.relativeTo(projectDir).path)
+        }
+        val failureSummary = DartTestReportParser.formatFailureSummary(summary)
+        if (failureSummary.isNotBlank()) {
+            context.emitOutput(outputs.failureSummary, failureSummary)
+        }
+
+        val hasFailed = !summary.success || (testFailure != null) || summary.failedCount > 0
+        if (hasFailed && !inputSet.ignoreFailures) {
+            val msg = if (summary.failedCount > 0) {
+                "Dart test task '$name' failed: ${summary.failedCount} of ${summary.totalCount} tests failed."
+            } else {
+                testFailure?.error?.message ?: "Dart test task '$name' failed."
+            }
+            val exitCode = testFailure?.exitCode ?: 1
+            return ExecutionResult.Failure(RuntimeException(msg), exitCode, outputs)
+        }
+
+        return ExecutionResult.Success(outputs)
     }
 }
 
