@@ -75,9 +75,11 @@ val distZip = tasks.register<Zip>("distZip") {
     archiveVersion.set(project.version.toString())
     destinationDirectory.set(layout.buildDirectory.dir("distributions"))
     from(bundleDir) {
+        // Conventional single top-level directory so unzipping stays tidy.
+        into("kartographer-${project.version}")
         eachFile {
             // Launchers must stay executable after unzip; jars do not need it.
-            if (path.startsWith("bin/")) permissions { unix("0755") }
+            if (path.contains("/bin/") || path.startsWith("bin/")) permissions { unix("0755") }
         }
     }
 }
@@ -90,8 +92,9 @@ val distTar = tasks.register<Tar>("distTar") {
     archiveExtension.set("tar.gz")
     destinationDirectory.set(layout.buildDirectory.dir("distributions"))
     from(bundleDir) {
+        into("kartographer-${project.version}")
         eachFile {
-            if (path.startsWith("bin/")) permissions { unix("0755") }
+            if (path.contains("/bin/") || path.startsWith("bin/")) permissions { unix("0755") }
         }
     }
 }
