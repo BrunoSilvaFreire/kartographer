@@ -1,3 +1,5 @@
+import java.time.Duration
+
 plugins {
     id("org.jetbrains.kotlin.jvm")
     `java-library`
@@ -25,6 +27,8 @@ dependencies {
     implementation(project(":tasks:flutter"))
     implementation(project(":tasks:dart"))
     implementation(project(":tasks:kubernetes"))
+    implementation(project(":tasks:buf"))
+    implementation(project(":tasks:github"))
 
     // Coroutines and gRPC
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0")
@@ -56,4 +60,6 @@ application {
 
 tasks.test {
     useJUnitPlatform()
+    // A hung receive loop (see the 111475b fallout) must fail the runner, not eat it.
+    timeout.set(Duration.ofMinutes(10))
 }
