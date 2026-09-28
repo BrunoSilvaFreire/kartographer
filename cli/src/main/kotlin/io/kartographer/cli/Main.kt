@@ -163,6 +163,7 @@ class RunCommand : CliktCommand(name = "run", help = "Run a task and all its dep
     private val taskName by argument(help = "The name of the task to run").optional()
     private val properties by option("-P").associate()
     private val ui by option("--ui", help = "Renderer to use for this run").choice(*UI_METHODS.toTypedArray())
+    private val dryRun by option("--dry-run", help = "Print what would run without executing it").flag()
 
     override fun run() {
         if (taskHelp && taskName == null) {
@@ -241,6 +242,7 @@ class RunCommand : CliktCommand(name = "run", help = "Run a task and all its dep
                     context = clientContext.toProto()
                     this.taskName = this@RunCommand.taskName!!
                     this.properties.putAll(this@RunCommand.properties)
+                    this.dryRun = this@RunCommand.dryRun
                 }
             }
         )
@@ -601,7 +603,7 @@ fun main(args: Array<String>) {
  * map onto task properties. This function distinguishes the two: known CLI options are passed
  * through verbatim, while anything else that looks like a long flag becomes a `-P name=value`.
  */
-private val VALUE_OPTIONS = setOf("--ui", "--project-dir", "--pipeline")
+private val VALUE_OPTIONS = setOf("--ui", "--project-dir", "--pipeline", "--dry-run")
 
 internal fun rewriteArgs(args: List<String>): List<String> {
     val newArgs = mutableListOf<String>()

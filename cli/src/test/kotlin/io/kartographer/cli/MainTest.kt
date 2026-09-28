@@ -46,6 +46,14 @@ class MainTest {
     }
 
     @Test
+    fun `rewriteArgs leaves --dry-run untouched`() {
+        assertEquals(
+            listOf("run", "--dry-run", "prod/containers/push"),
+            rewriteArgs(listOf("run", "--dry-run", "prod/containers/push"))
+        )
+    }
+
+    @Test
     fun `rewriteArgs converts unknown flag into a -P property`() {
         assertEquals(
             listOf("run", "prod/containers/push", "-P", "version=1.1.0-rc1"),
