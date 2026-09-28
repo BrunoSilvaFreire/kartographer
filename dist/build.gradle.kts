@@ -102,3 +102,106 @@ val distTar = tasks.register<Tar>("distTar") {
 tasks.named("assemble") {
     dependsOn(distZip, distTar)
 }
+
+// -------------------------------------------------------------------------------------------
+// Native installers via jpackage. jpackage creates a self-contained app image with its own
+// trimmed runtime, so a .deb or .msi needs no system Java. It drives the launcher classpath
+// from the main jar's manifest Class-Path, so each launcher gets a small generated "pointer"
+// jar listing exactly the jars it needs (all of which sit beside it in the app image).
+// -------------------------------------------------------------------------------------------
+
+val isWindowsHost = System.getProperty("os.name").lowercase().contains("win")
+val jpackageVersion = providers.provider { project.version.toString().substringBefore('-') }
+val jpackageInput = layout.buildDirectory.dir("jpackage/input")
+val daemonLauncherFile = layout.buildDirectory.file("jpackage/launchers/daemon.properties")
+
+val cliClassPath = providers.provider { cliRuntime.files.joinToString(" ") { it.name } }
+val daemonClassPath = providers.provider { daemonRuntime.files.joinToString(" ") { it.name } }
+
+val cliAppJar = tasks.register<Jar>("cliAppJar") {
+    archiveFileName.set("kartographer-cli.jar")
+    destinationDirectory.set(layout.buildDirectory.dir("jpackage/app"))
+    manifest {
+        attributes(
+            "Main-Class" to "io.kartographer.cli.MainKt",
+            "Class-Path" to cliClassPath,
+        )
+    }
+}
+
+val daemonAppJar = tasks.register<Jar>("daemonAppJar") {
+    archiveFileName.set("kartographer-daemon-app.jar")
+    destinationDirectory.set(layout.buildDirectory.dir("jpackage/app"))
+    manifest {
+        attributes(
+            "Main-Class" to "io.kartographer.daemon.MainKt",
+            "Class-Path" to daemonClassPath,
+        )
+    }
+}
+
+val stageJpackageInput = tasks.register<Sync>("stageJpackageInput") {
+    dependsOn(cliAppJar, daemonAppJar)
+    into(jpackageInput)
+    from(bundleRuntime)
+    from(cliAppJar)
+    from(daemonAppJar)
+}
+
+val writeDaemonLauncher = tasks.register("writeDaemonLauncher") {
+    val output = daemonLauncherFile.get().asFile
+    outputs.file(daemonLauncherFile)
+    doLast {
+        output.parentFile.mkdirs()
+        output.writeText(
+            "main-jar=kartographer-daemon-app.jar\n" +
+                "main-class=io.kartographer.daemon.MainKt\n"
+        )
+    }
+}
+
+val packageDeb = tasks.register<Exec>("packageDeb") {
+    group = "distribution"
+    description = "Build a self-contained Debian package (Linux only)."
+    onlyIf { !isWindowsHost }
+    dependsOn(stageJpackageInput, writeDaemonLauncher)
+    val dest = layout.buildDirectory.dir("distributions").get().asFile
+    doFirst { dest.mkdirs() }
+    commandLine(
+        "jpackage",
+        "--type", "deb",
+        "--input", jpackageInput.get().asFile.absolutePath,
+        "--main-jar", "kartographer-cli.jar",
+        "--main-class", "io.kartographer.cli.MainKt",
+        "--add-launcher", "kartographer-daemon=${daemonLauncherFile.get().asFile.absolutePath}",
+        "--name", "kartographer",
+        "--app-version", jpackageVersion.get(),
+        "--linux-package-name", "kartographer",
+        "--linux-shortcut",
+        "--dest", dest.absolutePath,
+    )
+}
+
+val packageMsi = tasks.register<Exec>("packageMsi") {
+    group = "distribution"
+    description = "Build a self-contained Windows MSI installer (Windows only)."
+    onlyIf { isWindowsHost }
+    dependsOn(stageJpackageInput, writeDaemonLauncher)
+    val dest = layout.buildDirectory.dir("distributions").get().asFile
+    doFirst { dest.mkdirs() }
+    commandLine(
+        "jpackage",
+        "--type", "msi",
+        "--input", jpackageInput.get().asFile.absolutePath,
+        "--main-jar", "kartographer-cli.jar",
+        "--main-class", "io.kartographer.cli.MainKt",
+        "--add-launcher", "kartographer-daemon=${daemonLauncherFile.get().asFile.absolutePath}",
+        "--name", "kartographer",
+        "--app-version", jpackageVersion.get(),
+        "--win-console",
+        "--win-dir-chooser",
+        "--win-menu",
+        "--win-shortcut",
+        "--dest", dest.absolutePath,
+    )
+}

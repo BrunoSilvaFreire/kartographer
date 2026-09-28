@@ -4,10 +4,26 @@ Kartographer is a topology-aware Directed Acyclic Graph (DAG) task orchestrator.
 
 ## Installation
 
-The only runtime requirement is **Java 21** — the bundle ships its own libraries and Kotlin
-compiler, so no Gradle or Kotlin installation is needed.
+The `.deb` and `.msi` packages are self-contained (they bundle a trimmed Java runtime).
+The `.zip`/`.tar.gz` archives require **Java 21** on the system — no Gradle or Kotlin needed.
 
-### Linux / macOS
+### Debian / Ubuntu
+
+```bash
+sudo apt install ./kartographer_0.1.0_amd64.deb
+kartographer --help
+```
+
+### Windows (MSI)
+
+Download `kartographer-0.1.0.msi` from the release and run it, or from PowerShell:
+
+```powershell
+msiexec /i kartographer-0.1.0.msi
+kartographer.bat --help
+```
+
+### Linux / macOS (archive)
 
 ```bash
 unzip kartographer-0.1.0.zip
@@ -15,7 +31,7 @@ export PATH="$PWD/kartographer-0.1.0/bin:$PATH"
 kartographer --help
 ```
 
-### Windows (PowerShell)
+### Windows (archive)
 
 ```powershell
 Expand-Archive kartographer-0.1.0.zip -DestinationPath .
@@ -23,19 +39,22 @@ $env:PATH += ";$PWD\kartographer-0.1.0\bin"
 kartographer.bat --help
 ```
 
-The bundle contains both launchers in `bin/`: `kartographer` (CLI) and `kartographer-daemon`
-(the long-lived process the CLI starts on demand). Keep them in the same `bin/` directory, and
-keep `bin/` next to `lib/`.
+Every archive contains both launchers in `bin/`: `kartographer` (CLI) and
+`kartographer-daemon` (the long-lived process the CLI starts on demand). Keep them in the same
+`bin/` directory, next to `lib/`.
 
 ### From source
 
 ```bash
 ./gradlew :dist:distZip          # default version 0.1.0-SNAPSHOT
 ./gradlew :dist:distZip -Pversion=0.1.0
+./gradlew :dist:packageDeb       # Linux, needs jpackage + dpkg
+./gradlew :dist:packageMsi       # Windows, needs jpackage + WiX
 ```
 
 `./bootstrap.sh` remains the developer path: it builds `installDist` and symlinks `kartographer`
 and `kartographer-daemon` into `~/.local/bin`.
+
 
 
 ## Why Topology-Aware DAG Orchestration?

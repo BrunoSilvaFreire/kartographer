@@ -33,9 +33,18 @@ jobs:
           # The daemon and integration suites drive POSIX shells and signals, so they run on
           # Linux. Windows is covered by compilation plus the bundle smoke test below.
           if [ "$RUNNER_OS" = "Windows" ]; then
-            ./gradlew build :dist:distZip -x :daemon:test -x :integration-tests:test
+            ./gradlew build :dist:distZip :dist:packageMsi -x :daemon:test -x :integration-tests:test
           else
-            ./gradlew build :dist:distZip
+            ./gradlew build :dist:distZip :dist:distTar :dist:packageDeb
+          fi
+
+      - name: Verify the native installer was produced
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            ls dist/build/distributions/*.msi
+          else
+            ls dist/build/distributions/*.deb
           fi
 
       - name: Smoke test the bundle (Linux)
