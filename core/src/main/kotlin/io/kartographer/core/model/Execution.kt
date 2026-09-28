@@ -96,11 +96,27 @@ class BashSpec : ExecSpec() {
 
     override fun buildCommandLine(): String {
         val exe = command ?: throw IllegalStateException("Command executable not specified in BashSpec")
-        val escapedArgs = args.map { 
-            val hasSpecial = it.any { c -> c in " \t\n|&;()<>*?[]$\"'\\!{}^~" }
-            if (hasSpecial) "'${it.replace("'", "'\\''")}'" else it 
-        }
-        return if (escapedArgs.isEmpty()) exe else "$exe ${escapedArgs.joinToString(" ")}"
+        val quoted = if (isWindows()) args.map(::quoteForCmd) else args.map(::quoteForPosix)
+        return if (quoted.isEmpty()) exe else "$exe ${quoted.joinToString(" ")}"
+    }
+
+    private fun isWindows(): Boolean =
+        System.getProperty("os.name").lowercase().contains("win")
+
+    private fun quoteForPosix(arg: String): String {
+        val hasSpecial = arg.any { c -> c in " \t\n|&;()<>*?[]$\"'\\!{}^~" }
+        return if (hasSpecial) "'${arg.replace("'", "'\\''")}'" else arg
+    }
+
+    /**
+     * cmd.exe quoting. Wraps arguments that would otherwise be split or interpreted by the
+     * shell. Embedded double quotes are backslash-escaped, which cmd passes through to the
+     * child; this is enough for paths and URLs but is not a full cmd parser, so callers that
+     * need shell operators must still build the whole command themselves.
+     */
+    private fun quoteForCmd(arg: String): String {
+        val hasSpecial = arg.any { c -> c in " \t\n|&;()<>^\"%!" }
+        return if (hasSpecial) "\"${arg.replace("\"", "\\\"")}\"" else arg
     }
 }
 

@@ -178,42 +178,74 @@ class DaemonConnection private constructor(
             log.parentFile?.mkdirs()
 
             try {
-                ProcessBuilder(binary.absolutePath)
+                val process = ProcessBuilder(binary.absolutePath)
                     .redirectOutput(ProcessBuilder.Redirect.appendTo(log))
                     .redirectErrorStream(true)
                     // Detached: the daemon has to outlive this CLI invocation, and inheriting
-                    // our stdio would let it scribble over the user's terminal later.
-                    .redirectInput(ProcessBuilder.Redirect.from(File("/dev/null")))
+                    // our stdio would let it scribble over the user's terminal later. A piped
+                    // stdin closed immediately gives the child EOF portably; File("/dev/null")
+                    // does not exist on Windows.
+                    .redirectInput(ProcessBuilder.Redirect.PIPE)
                     .start()
+                runCatching { process.outputStream.close() }
             } catch (e: Exception) {
                 throw DaemonUnavailable("Failed to start the Kartographer daemon: ${e.localizedMessage}", e)
             }
         }
 
+        private fun isWindows(): Boolean =
+            System.getProperty("os.name").lowercase().contains("win")
+
+        /** Candidate launcher names, most specific first. Windows uses a `.bat` wrapper. */
+        private fun daemonBinaryNames(): List<String> = if (isWindows()) {
+            listOf("kartographer-daemon.bat", "kartographer-daemon.cmd", "kartographer-daemon.exe", "kartographer-daemon")
+        } else {
+            listOf("kartographer-daemon")
+        }
+
+        private fun File.isRunnable(): Boolean = isFile && (isWindows() || canExecute())
+
         private fun findDaemonBinary(): File? {
             System.getenv(DAEMON_BIN_ENV)?.takeIf { it.isNotBlank() }?.let { path ->
-                return File(path).takeIf { it.canExecute() }
+                return File(path).takeIf { it.isRunnable() }
             }
 
-            val fromPath = (System.getenv("PATH") ?: "")
+            // Prefer the daemon shipped beside this CLI (the release bundle layout) so a
+            // bundle never mixes its CLI with an unrelated daemon on PATH.
+            daemonBinaryFromSiblingInstall()?.let { return it }
+
+            val names = daemonBinaryNames()
+            return (System.getenv("PATH") ?: "")
                 .split(File.pathSeparator)
                 .asSequence()
                 .filter { it.isNotBlank() }
-                .map { File(it, "kartographer-daemon") }
-                .firstOrNull { it.canExecute() }
-            if (fromPath != null) return fromPath
-
-            return daemonBinaryFromSiblingInstall()
+                .flatMap { dir -> names.asSequence().map { File(dir, it) } }
+                .firstOrNull { it.isRunnable() }
         }
 
         /**
-         * Falls back to the repository layout `./gradlew installDist` produces, so the daemon
-         * is reachable from a build tree that was never bootstrapped onto PATH.
+         * Falls back to the layout of the distribution this CLI was installed from. A release
+         * bundle keeps both launchers side by side in `<bundle>/bin`; a `./gradlew installDist`
+         * build tree keeps the daemon in its own project directory.
          */
         private fun daemonBinaryFromSiblingInstall(): File? {
             val cliInstallDir = cliInstallDir() ?: return null
+
+            // Release bundle: <bundle>/lib/cli-*.jar -> <bundle>/bin/kartographer-daemon[.bat]
+            daemonBinaryNames()
+                .asSequence()
+                .map { File(File(cliInstallDir, "bin"), it) }
+                .firstOrNull { it.isRunnable() }
+                ?.let { return it }
+
+            // Repository layout from `./gradlew installDist`.
             val repoRoot = cliInstallDir.parentFile?.parentFile?.parentFile?.parentFile ?: return null
-            return File(repoRoot, "daemon/build/install/daemon/bin/daemon").takeIf { it.canExecute() }
+            val legacy = File(repoRoot, "daemon/build/install/daemon/bin/daemon")
+            return daemonBinaryNames()
+                .asSequence()
+                .map { File(legacy.parentFile, it) }
+                .plus(legacy)
+                .firstOrNull { it.isRunnable() }
         }
 
         /** `<...>/cli/build/install/cli`, derived from the jar this class was loaded from. */
