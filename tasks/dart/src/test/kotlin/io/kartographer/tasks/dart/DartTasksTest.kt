@@ -66,7 +66,7 @@ class DartTasksTest {
         task.execute(contextFor(recorder))
 
         assertTrue(
-            recorder.workingDirs.single().endsWith("/packages/evaluator"),
+            recorder.workingDirs.single().replace('\\', '/').endsWith("/packages/evaluator"),
             "expected the package directory, got ${recorder.workingDirs.single()}",
         )
     }
