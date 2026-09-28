@@ -28,6 +28,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Build and assemble the distribution
+        shell: bash
         run: ./gradlew build :dist:distZip
 
       - name: Smoke test the bundle (Linux)
