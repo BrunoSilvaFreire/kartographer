@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [master, "feat/**", "codex/**"]
+  pull_request:
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build and assemble the distribution
+        run: ./gradlew build :dist:distZip
+
+      - name: Smoke test the bundle (Linux)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$(mktemp -d)"
+          mkdir -p "$WORK/proj"
+          echo 'task<Delete>("clean") { }' > "$WORK/proj/karto.kts"
+          cd "$WORK"
+          unzip -q "$GITHUB_WORKSPACE"/dist/build/distributions/kartographer-*.zip
+          export KARTOGRAPHER_DAEMON_SOCKET="$WORK/daemon.sock"
+          "$WORK"/kartographer-*/bin/kartographer --help
+          "$WORK"/kartographer-*/bin/kartographer -d "$WORK/proj" tasks
+
+      - name: Smoke test the bundle (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $work = Join-Path $env:RUNNER_TEMP "karto-smoke"
+          New-Item -ItemType Directory -Force -Path (Join-Path $work "proj") | Out-Null
+          Set-Content -Path (Join-Path $work "proj/karto.kts") -Value 'task<Delete>("clean") { }'
+          $zip = Get-ChildItem "$env:GITHUB_WORKSPACE/dist/build/distributions/kartographer-*.zip" | Select-Object -First 1
+          Expand-Archive -Path $zip.FullName -DestinationPath $work
+          $bin = (Get-ChildItem "$work/kartographer-*/bin" -Directory | Select-Object -First 1).FullName
+          $env:KARTOGRAPHER_DAEMON_SOCKET = Join-Path $work "daemon.sock"
+          & (Join-Path $bin "kartographer.bat") --help
+          & (Join-Path $bin "kartographer.bat") -d (Join-Path $work "proj") tasks
+
+      - name: Stop the daemon (Linux)
+        if: always() && runner.os != 'Windows'
+        shell: bash
+        run: pkill -f io.kartographer.daemon.MainKt || true
+
+      - name: Stop the daemon (Windows)
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*io.kartographer.daemon.MainKt*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
