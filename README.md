@@ -2,6 +2,42 @@
 
 Kartographer is a topology-aware Directed Acyclic Graph (DAG) task orchestrator. It allows you to define pipelines using a clean, type-safe Kotlin DSL, validate dependencies, and execute tasks locally while targeting specific hardware, operating system, or environment requirements.
 
+## Installation
+
+The only runtime requirement is **Java 21** — the bundle ships its own libraries and Kotlin
+compiler, so no Gradle or Kotlin installation is needed.
+
+### Linux / macOS
+
+```bash
+unzip kartographer-0.1.0.zip
+export PATH="$PWD/kartographer-0.1.0/bin:$PATH"
+kartographer --help
+```
+
+### Windows (PowerShell)
+
+```powershell
+Expand-Archive kartographer-0.1.0.zip -DestinationPath .
+$env:PATH += ";$PWD\kartographer-0.1.0\bin"
+kartographer.bat --help
+```
+
+The bundle contains both launchers in `bin/`: `kartographer` (CLI) and `kartographer-daemon`
+(the long-lived process the CLI starts on demand). Keep them in the same `bin/` directory, and
+keep `bin/` next to `lib/`.
+
+### From source
+
+```bash
+./gradlew :dist:distZip          # default version 0.1.0-SNAPSHOT
+./gradlew :dist:distZip -Pversion=0.1.0
+```
+
+`./bootstrap.sh` remains the developer path: it builds `installDist` and symlinks `kartographer`
+and `kartographer-daemon` into `~/.local/bin`.
+
+
 ## Why Topology-Aware DAG Orchestration?
 
 Modern build and workflow orchestrators often treat target executors as uniform or rely entirely on container isolation. However, in heterogeneous hybrid or edge environments, certain tasks require specific placement:
