@@ -7,8 +7,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.condition.EnabledOnOs
+import org.junit.jupiter.api.condition.OS
 import java.nio.file.Paths
 
+// Every case drives a POSIX shell and POSIX signal semantics (`sh -c`, `trap INT`, `pgrep`).
+// They say nothing about the Windows path, which uses cmd.exe and ProcessHandle.destroy.
+@EnabledOnOs(OS.LINUX, OS.MAC)
 class LocalProcessExecutorTest {
 
     @Test

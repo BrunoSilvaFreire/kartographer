@@ -3,6 +3,8 @@ package io.kartographer.core.plugins
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.condition.EnabledOnOs
+import org.junit.jupiter.api.condition.OS
 import java.io.File
 import java.nio.file.Files
 
@@ -49,6 +51,7 @@ class FindGradlewTest {
     }
 
     @Test
+    @EnabledOnOs(OS.LINUX, OS.MAC)
     fun `a non-executable pinned gradle is ignored in favour of the wrapper`() {
         val root = tempDir()
         val wrapper = File(root, "gradlew").apply { writeText("#!/bin/sh\n") }

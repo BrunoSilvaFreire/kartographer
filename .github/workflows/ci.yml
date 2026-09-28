@@ -29,7 +29,14 @@ jobs:
 
       - name: Build and assemble the distribution
         shell: bash
-        run: ./gradlew build :dist:distZip
+        run: |
+          # The daemon and integration suites drive POSIX shells and signals, so they run on
+          # Linux. Windows is covered by compilation plus the bundle smoke test below.
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            ./gradlew build :dist:distZip -x :daemon:test -x :integration-tests:test
+          else
+            ./gradlew build :dist:distZip
+          fi
 
       - name: Smoke test the bundle (Linux)
         if: runner.os != 'Windows'
