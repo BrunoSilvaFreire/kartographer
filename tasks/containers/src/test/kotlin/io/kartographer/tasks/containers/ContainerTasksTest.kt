@@ -4,16 +4,18 @@ import io.kartographer.core.model.ExecutionContext
 import io.kartographer.core.model.ExecutionEnvironment
 import io.kartographer.core.model.Worker
 import io.kartographer.core.model.WorkerId
+import io.kartographer.core.scheduler.TaskStateStore
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.nio.file.Paths
 
 class ContainerTasksTest {
 
     @Test
-    fun containerBuildAndPushAlwaysRunBecauseTheirStateIsExternal() = runBlocking {
+    fun containerBuildAndPushRerunUntilTheirExternalStateMatches() = runBlocking {
         val context = ExecutionContext(
             projectDir = Paths.get("").toAbsolutePath(),
             worker = Worker(WorkerId("test-worker")),
@@ -29,6 +31,37 @@ class ContainerTasksTest {
 
         assertFalse(build.isUpToDate(context))
         assertFalse(push.isUpToDate(context))
+    }
+
+    @Test
+    fun buildUsesPropertiesAndImageExistenceForUpToDateChecks() = runBlocking {
+        val context = ExecutionContext(projectDir = Paths.get("").toAbsolutePath(), worker = Worker(WorkerId("test-worker")))
+        val build = object : ContainerBuild("build-state") {
+            override fun localImageExists(context: ExecutionContext, ref: String) = true
+        }.apply {
+            imageName.set("registry.example/image")
+            containerfile.set("tasks/containers/build.gradle.kts")
+            version.set("release")
+            buildArgs.set(mapOf("PROJECT_VERSION" to "old", "GIT_COMMIT" to "ignored", "FOO" to "old"))
+        }
+        TaskStateStore.saveState(context, build)
+        assertTrue(build.isUpToDate(context))
+        build.buildArgs.set(mapOf("PROJECT_VERSION" to "old", "FOO" to "changed"))
+        assertFalse(build.isUpToDate(context))
+        assertFalse(build.isUpToDate(context, dependencyRan = true))
+    }
+
+    @Test
+    fun pushSkipsOnlyWhenDigestsMatch() = runBlocking {
+        val context = ExecutionContext(projectDir = Paths.get("").toAbsolutePath(), worker = Worker(WorkerId("test-worker")))
+        val matches = object : ContainerPush("push-state") {
+            override fun registryDigestMatches() = true
+        }.apply { imageRef.set("registry.example/image:release"); registry.set("") }
+        assertTrue(matches.isUpToDate(context))
+        val fails = object : ContainerPush("push-failure") {
+            override fun registryDigestMatches() = false
+        }.apply { imageRef.set("registry.example/image:release"); registry.set("") }
+        assertFalse(fails.isUpToDate(context))
     }
 
     @Test

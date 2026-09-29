@@ -7,8 +7,12 @@ import io.kartographer.core.model.NoOutputs
 import io.kartographer.core.model.OutputSet
 import io.kartographer.core.model.Task
 import io.kartographer.core.model.executeBash
+import io.kartographer.core.scheduler.UpToDateHelpers
 import java.time.Instant
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
 import java.nio.file.Path
+import java.security.MessageDigest
 
 // Elevation is not handled per-client: when a run needs privileges, wrap the
 // whole invocation as `llm-sudo <karto> ...` so karto itself runs under sudo.
@@ -52,9 +56,14 @@ open class ContainerBuild(name: String) : Task<ContainerBuildInputs, ContainerBu
         get() = containerClient.directOrNull()?.rootful ?: false
 
     init {
-        // The image store is external to Kartographer's state directory and may
-        // be changed or removed independently. Always rebuild when requested.
-        alwaysRun()
+        trackProperty("containerfile") { sha256(Path.of(containerfile.directOrNull() ?: "")) }
+        trackProperty("build-args") { cacheBuildArgs() }
+        trackProperty("platforms") { platforms.directOrNull()?.sorted().orEmpty() }
+        trackProperty("context") { contextFingerprint(Path.of(context.directOrNull() ?: ".")) }
+        upToDateWhen { ctx, task ->
+            localImageExists(ctx, fullImageRef()) &&
+                UpToDateHelpers.customPropertiesMatch().isUpToDate(ctx, task)
+        }
     }
 
     override suspend fun buildInputs(context: ExecutionContext): ContainerBuildInputs {
@@ -70,6 +79,28 @@ open class ContainerBuild(name: String) : Task<ContainerBuildInputs, ContainerBu
     }
 
     override fun buildOutputs() = ContainerBuildOutputs()
+
+    protected open fun localImageExists(context: ExecutionContext, ref: String): Boolean =
+        platforms.directOrNull().orEmpty().ifEmpty { listOf("") }.all { platform ->
+            runContainerCommand(
+                containerClient.directOrNull() ?: ContainerClient.DOCKER,
+                namespace.directOrNull(),
+                listOf("image", "inspect") +
+                    (if (platform.isEmpty()) emptyList() else listOf("--platform", platform)) +
+                    ref,
+            ) != null
+        }
+
+    private fun fullImageRef() = version.directOrNull()?.let { "${imageName.directOrNull()}:$it" } ?: imageName.directOrNull().orEmpty()
+
+    private fun cacheBuildArgs(): Map<String, String> {
+        val args = buildArgs.directOrNull()?.toMutableMap() ?: linkedMapOf()
+        version.directOrNull()?.let { version ->
+            if ("PROJECT_VERSION" in args) args["PROJECT_VERSION"] = version
+            if ("VERSION" !in args) args["VERSION"] = version
+        }
+        return args.filterKeys { it != "BUILD_DATE" && it != "GIT_COMMIT" }.toSortedMap()
+    }
 
     override suspend fun execute(context: ExecutionContext, inputSet: ContainerBuildInputs): ExecutionResult<ContainerBuildOutputs> {
         val clientCmd = inputSet.containerClient.command
@@ -142,9 +173,7 @@ open class ContainerPush(name: String) : Task<ContainerPushInputs, ContainerPush
         get() = containerClient.directOrNull()?.rootful ?: false
 
     init {
-        // A registry tag is external mutable state. In particular, rerunning a
-        // release push must repair a missing or reduced multi-platform index.
-        alwaysRun()
+        upToDateWhen { _, _ -> registryDigestMatches() }
     }
 
     override suspend fun buildInputs(context: ExecutionContext) = ContainerPushInputs(
@@ -152,6 +181,16 @@ open class ContainerPush(name: String) : Task<ContainerPushInputs, ContainerPush
     )
 
     override fun buildOutputs() = ContainerPushOutputs()
+
+    protected open fun registryDigestMatches(): Boolean {
+        val image = imageRef.directOrNull().orEmpty()
+        val registry = registry.directOrNull().orEmpty()
+        val fullRef = if (registry.isEmpty()) image else "$registry/$image"
+        val client = containerClient.directOrNull() ?: ContainerClient.DOCKER
+        val local = localImageDigest(client, namespace.directOrNull(), image) ?: return false
+        val remote = remoteManifestDigest(client, namespace.directOrNull(), fullRef) ?: return false
+        return local == remote
+    }
 
     override suspend fun execute(context: ExecutionContext, inputSet: ContainerPushInputs): ExecutionResult<ContainerPushOutputs> {
         val clientCmd = inputSet.containerClient.command
@@ -186,6 +225,57 @@ open class ContainerPush(name: String) : Task<ContainerPushInputs, ContainerPush
             else -> success { pushedRef.set(fullRef) }
         }
     }
+}
+
+private fun sha256(path: Path): String = try {
+    MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(path)).joinToString("") { "%02x".format(it) }
+} catch (_: Exception) {
+    ""
+}
+
+private fun contextFingerprint(context: Path): String = try {
+    val root = commandOutput(context, listOf("git", "rev-parse", "--show-toplevel"))?.let(Path::of) ?: return ""
+    val relative = root.relativize(context.toAbsolutePath())
+    val revision = commandOutput(root, listOf("git", "rev-parse", "HEAD")) ?: return ""
+    val diff = commandOutput(root, listOf("git", "diff", "HEAD", "--binary", "--", relative.toString())) ?: return ""
+    val untracked = commandOutput(root, listOf("git", "ls-files", "--others", "--exclude-standard", "-z", "--", relative.toString()))
+        ?.split('\u0000')?.filter(String::isNotEmpty)?.sorted().orEmpty()
+    val digest = MessageDigest.getInstance("SHA-256")
+    digest.update(revision.toByteArray(StandardCharsets.UTF_8))
+    digest.update(diff.toByteArray(StandardCharsets.UTF_8))
+    untracked.forEach { file ->
+        digest.update(file.toByteArray(StandardCharsets.UTF_8))
+        digest.update(Files.readAllBytes(root.resolve(file)))
+    }
+    digest.digest().joinToString("") { "%02x".format(it) }
+} catch (_: Exception) {
+    ""
+}
+
+private fun localImageDigest(client: ContainerClient, namespace: String?, ref: String): String? =
+    runContainerCommand(client, namespace, listOf("image", "inspect", "--mode=native", "--format", "{{.Target.Digest}}", ref))
+        ?.trim()?.takeIf { it.startsWith("sha256:") }
+
+private fun remoteManifestDigest(client: ContainerClient, namespace: String?, ref: String): String? =
+    runContainerCommand(client, namespace, listOf("manifest", "inspect", ref))
+        ?.let { "sha256:" + MessageDigest.getInstance("SHA-256").digest(it.toByteArray(StandardCharsets.UTF_8)).joinToString("") { byte -> "%02x".format(byte) } }
+
+private fun runContainerCommand(client: ContainerClient, namespace: String?, args: List<String>): String? {
+    val command = client.command.split(" ").toMutableList()
+    if (namespace != null && client.command.contains("nerdctl")) command += listOf("--namespace", namespace)
+    command += args
+    return commandOutput(null, command)
+}
+
+private fun commandOutput(directory: Path?, command: List<String>): String? = try {
+    val process = ProcessBuilder(command).apply {
+        directory?.let { directory(it.toFile()) }
+        redirectErrorStream(true)
+    }.start()
+    val output = process.inputStream.bufferedReader().use { it.readText() }
+    if (process.waitFor() == 0) output else null
+} catch (_: Exception) {
+    null
 }
 
 data class ContainerRunInputs(
