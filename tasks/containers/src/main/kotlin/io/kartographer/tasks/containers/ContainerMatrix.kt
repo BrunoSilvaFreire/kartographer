@@ -6,11 +6,18 @@ import io.kartographer.core.model.InputSet
 import io.kartographer.core.model.NoOutputs
 import io.kartographer.core.model.Task
 import io.kartographer.dsl.GroupSpec
+import io.kartographer.core.scheduler.TaskStateStore
 
 data class ImmutableReleaseTagInputs(var version: String) : InputSet()
 
 class ImmutableReleaseTag(name: String) : Task<ImmutableReleaseTagInputs, NoOutputs>(name) {
     val version = property<String>().withCLI("version", "Override the image version")
+
+    init {
+        upToDateWhen { context, task ->
+            TaskStateStore.loadState(context, task)?.inputHash == context.inputHash
+        }
+    }
 
     override suspend fun buildInputs(context: ExecutionContext) = ImmutableReleaseTagInputs(version.get())
     override fun buildOutputs() = NoOutputs()
