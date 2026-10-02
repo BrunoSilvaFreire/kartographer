@@ -47,6 +47,14 @@ class PlainRenderer : Renderer {
                 is ExecutionEvent.TaskStarted -> {
                     log("[${event.task.name}] Started.")
                 }
+                is ExecutionEvent.TaskReady -> {
+                    log("[${event.task.name}] Ready.")
+                    summary[event.task.name] = "ready" to event.outputs
+                }
+                is ExecutionEvent.TaskStopped -> {
+                    log("[${event.task.name}] Stopped.")
+                    summary[event.task.name] = "stopped" to event.outputs
+                }
                 is ExecutionEvent.TaskOutput -> {
                     log("[${event.task.name}] ${event.line}", isError = event.isError)
                 }

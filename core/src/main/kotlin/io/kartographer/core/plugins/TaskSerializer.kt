@@ -106,7 +106,9 @@ object TaskSerializer {
             "id", "name", "dependencyObjects", "dependencyNames", 
             "inputs", "outputs", "trackedOutputs", "topologyRequirements", 
             "registeredProperties", "declaredOutputs", "upToDateChecks",
-            "neverUpToDate", "alwaysRuns", "hasVerifiableState", "canReverify",
+            "neverUpToDate", "alwaysRuns", "runsAfterDependencyFailure",
+            "hasVerifiableState", "canReverify", "lifecycle", "serviceSpec",
+            "completionDependencyObjects", "completionDependencyNames", "completionInvocationDependencies",
             "customFilesToTrack", "customPropertiesToTrack"
         )
     }

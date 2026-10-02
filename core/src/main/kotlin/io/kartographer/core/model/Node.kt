@@ -9,10 +9,14 @@ const val SECRET_MASK = "***"
 abstract class Node(val name: String) {
     val id: TaskId = TaskId(name)
     open val executionId: String get() = id.value
+    open val lifecycle: TaskLifecycle get() = TaskLifecycle.FINITE
     val dependencyObjects = mutableSetOf<Node>()
     val dependencyNames = mutableSetOf<String>()
     internal val configuredDependencies = mutableListOf<ConfiguredDependency<*, *>>()
     internal val invocationDependencies = mutableSetOf<TaskInvocationRef>()
+    internal val completionDependencyObjects = mutableSetOf<Node>()
+    internal val completionDependencyNames = mutableSetOf<String>()
+    internal val completionInvocationDependencies = mutableSetOf<TaskInvocationRef>()
 
     // CLI properties live on every node, not just tasks: a group can declare a
     // flag (e.g. `--version` on a push group) that the CLI surfaces and validates
@@ -45,6 +49,17 @@ abstract class Node(val name: String) {
         return outputs
     }
 
+    fun <I : InputSet, O : OutputSet> dependsOnCompletion(task: Task<I, O>, configure: (I) -> Unit): O {
+        val ordinal = configuredDependencies.count { it.task === task } + 1
+        val id = "$name->${task.name}#$ordinal"
+        val display = "${task.name} @ $name" + if (ordinal == 1) "" else "#$ordinal"
+        val ref = TaskInvocationRef(id, display, task, configured = true)
+        @Suppress("UNCHECKED_CAST")
+        val outputs = task.buildOutputs().also { it.bind(ref) } as O
+        configuredDependencies.add(ConfiguredDependency(task, ref, configure, outputs, forceCompletion = true))
+        return outputs
+    }
+
     fun dependsOn(outputs: OutputSet) {
         val ref = outputs.invocation
             ?: throw IllegalArgumentException("OutputSet is not bound to a task invocation.")
@@ -53,6 +68,20 @@ abstract class Node(val name: String) {
 
     fun dependsOn(vararg nodeNames: String) {
         dependencyNames.addAll(nodeNames)
+    }
+
+    fun dependsOnCompletion(vararg nodes: Node) {
+        completionDependencyObjects.addAll(nodes)
+    }
+
+    fun dependsOnCompletion(vararg nodeNames: String) {
+        completionDependencyNames.addAll(nodeNames)
+    }
+
+    fun dependsOnCompletion(outputs: OutputSet) {
+        val ref = outputs.invocation
+            ?: throw IllegalArgumentException("OutputSet is not bound to a task invocation.")
+        completionInvocationDependencies.add(ref)
     }
 }
 
@@ -67,6 +96,46 @@ abstract class Task<I : InputSet, O : OutputSet>(name: String) : Node(name) {
 
     open val requiresElevation: Boolean get() = false
     internal val inputBuildMutex = Mutex()
+
+    // Resources this task must hold to run. Order is irrelevant — the scheduler acquires
+    // by name so that two tasks wanting the same pair cannot deadlock on each other.
+    val semaphores = linkedSetOf<SemaphoreHandle>()
+    final override var lifecycle: TaskLifecycle = TaskLifecycle.FINITE
+        private set
+    var serviceSpec: ServiceSpec? = null
+        private set
+
+    fun service(configure: ServiceSpec.() -> Unit) {
+        check(serviceSpec == null) { "Task '$name' is already configured as a service." }
+        serviceSpec = ServiceSpec().apply(configure).validated()
+        lifecycle = TaskLifecycle.SERVICE
+        alwaysRun()
+        topology { localOnly() }
+    }
+
+    /** Declares that this task holds [handles] while it runs. */
+    fun acquires(vararg handles: SemaphoreHandle) {
+        semaphores.addAll(handles)
+    }
+
+    /** [acquires] for a task type that knows its own conflict without the pipeline saying so. */
+    fun acquires(name: String, permits: Int = 1) {
+        semaphores.add(SemaphoreHandle(name, permits))
+    }
+
+    /**
+     * Which of [semaphores] this particular invocation actually needs.
+     *
+     * A task type that declares a resource it only sometimes touches narrows it here — the
+     * conflict may depend on how the task was configured, and a task that queues for a
+     * resource it will not use is just serialisation with extra steps. The declared set
+     * still sizes the run's semaphores, so overriding this cannot invent a new one.
+     */
+    open fun semaphoresToAcquire(inputSet: I): Collection<SemaphoreHandle> = semaphores
+
+    @Suppress("UNCHECKED_CAST")
+    fun semaphoresToAcquireAny(inputSet: InputSet): Collection<SemaphoreHandle> =
+        semaphoresToAcquire(inputSet as I)
 
     abstract suspend fun buildInputs(context: ExecutionContext): I
     abstract fun buildOutputs(): O
@@ -111,6 +180,17 @@ abstract class Task<I : InputSet, O : OutputSet>(name: String) : Node(name) {
     // the intent without having to run the checks.
     var neverUpToDate = false
         private set
+
+    /**
+     * Lets reporting/finalizer tasks inspect outputs even when an upstream task failed.
+     * Such a task owns the final outcome and must return Failure when the run should fail.
+     */
+    var runsAfterDependencyFailure = false
+        private set
+
+    fun runAfterFailedDependencies() {
+        runsAfterDependencyFailure = true
+    }
 
     // Declares that this task has no cacheable result and must run on every invocation.
     fun alwaysRun() {

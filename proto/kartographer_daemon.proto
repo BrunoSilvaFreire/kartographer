@@ -62,6 +62,7 @@ message ExecuteTaskRequest {
   bool dry_run = 11;
   string input_set_json = 12;
   string invocation_id = 13;
+  TaskLifecycle lifecycle = 14;
 }
 
 message ExecuteTaskResponse {
@@ -99,6 +100,26 @@ enum RunStatus {
   RUN_SUCCESS = 0;
   RUN_FAILURE = 1;
   RUN_UP_TO_DATE = 2;
+  RUN_CANCELLED = 3;
+}
+
+enum TaskLifecycle {
+  TASK_FINITE = 0;
+  TASK_SERVICE = 1;
+}
+
+enum DependencyCondition {
+  DEPENDENCY_COMPLETED = 0;
+  DEPENDENCY_READY = 1;
+}
+
+enum TaskExecutionState {
+  TASK_QUEUED = 0;
+  TASK_RUNNING = 1;
+  TASK_READY = 2;
+  TASK_STOPPED = 3;
+  TASK_COMPLETED = 4;
+  TASK_FAILED = 5;
 }
 
 message PropertyInfo {
@@ -118,14 +139,22 @@ message NodeInfo {
   bool is_task = 5;
   bool requires_elevation = 6;
   bool always_runs = 7;                  // No cacheable result; runs on every invocation
+  TaskLifecycle lifecycle = 8;
 }
 
 // A node with its dependencies resolved through the DAG, for `karto graph`.
+message ResolvedDependency {
+  string invocation_id = 1;
+  string display_name = 2;
+  DependencyCondition condition = 3;
+}
+
 message ResolvedNode {
   string name = 1;
-  repeated string dependencies = 2;
+  repeated ResolvedDependency dependencies = 2;
   string invocation_id = 3;
   string display_name = 4;
+  TaskLifecycle lifecycle = 5;
 }
 
 message DescribeProjectRequest {
@@ -215,6 +244,18 @@ message TaskOutputProduced {
   string invocation_id = 5;
 }
 
+message TaskReady {
+  string task = 1;
+  map<string, string> outputs = 2;
+  string invocation_id = 3;
+}
+
+message TaskStopped {
+  string task = 1;
+  map<string, string> outputs = 2;
+  string invocation_id = 3;
+}
+
 enum PromptKind {
   PROMPT_GENERIC = 0;
   // The pre-run sudo prompt. Carries `elevated_tasks` so the CLI can print the same banner
@@ -255,6 +296,8 @@ message RunServerMessage {
     PipelineCompleted pipeline_completed = 7;
     RunError error = 8;
     TaskOutputProduced task_output_produced = 9;
+    TaskReady task_ready = 10;
+    TaskStopped task_stopped = 11;
   }
 }
 
@@ -269,7 +312,7 @@ message QueryRunsRequest {
 
 message TaskExecutionInfo {
   string task_name = 1;
-  string state = 2;                  // "QUEUED", "RUNNING", "COMPLETED", "FAILED"
+  TaskExecutionState state = 2;
   int64 started_at_millis = 3;
   int64 completed_at_millis = 4;
   map<string, string> outputs = 5;

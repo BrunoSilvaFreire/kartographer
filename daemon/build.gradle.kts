@@ -45,6 +45,12 @@ dependencies {
     implementation("org.jetbrains.kotlin:kotlin-scripting-compiler-embeddable:2.2.10")
     implementation("ch.qos.logback:logback-classic:1.5.3")
 
+    // Native task-log sinks only. journald's structured fields need `sd_journal_sendv` (the
+    // datagram protocol; JDK 21 only speaks stream unix sockets), and the Windows Event Log
+    // needs RegisterEventSource/ReportEvent. Kept off the CLI, which only reads files.
+    implementation("net.java.dev.jna:jna:5.17.0")
+    implementation("net.java.dev.jna:jna-platform:5.17.0")
+
     testImplementation(testFixtures(project(":core")))
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

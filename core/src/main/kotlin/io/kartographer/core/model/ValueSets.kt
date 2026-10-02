@@ -35,6 +35,9 @@ abstract class OutputSet {
 
     internal fun values(): Map<String, Output<*>> = declared.toMap()
 
+    /** The names this set declares — for a task that inspects what a dependency reports. */
+    val outputNames: Set<String> get() = declared.keys.toSet()
+
     internal suspend fun rendered(maskSecrets: Boolean = true): Map<String, String> = buildMap {
         for ((name, output) in declared) {
             if (!output.isPresent()) continue
@@ -288,7 +291,8 @@ internal data class ConfiguredDependency<I : InputSet, O : OutputSet>(
     val task: Task<I, O>,
     val ref: TaskInvocationRef,
     val configure: (I) -> Unit,
-    val outputs: O
+    val outputs: O,
+    val forceCompletion: Boolean = false
 ) {
     @Suppress("UNCHECKED_CAST")
     fun configureAny(inputSet: InputSet) = configure(inputSet as I)

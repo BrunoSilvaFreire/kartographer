@@ -2,6 +2,7 @@ package io.kartographer.cli.render
 
 import io.kartographer.core.model.ExecutionEvent
 import io.kartographer.core.model.ExecutionResult
+import io.kartographer.core.model.DependencyCondition
 import io.kartographer.core.model.NoOutputs
 import io.kartographer.core.model.Node
 import io.kartographer.core.model.graph.AdjacencyList
@@ -15,12 +16,12 @@ class MosaicRendererTest {
 
     private fun node(name: String) = TestNode(name)
 
-    private fun graph(vararg deps: Pair<String, String>): AdjacencyList<Node, Unit> {
-        val g = AdjacencyList<Node, Unit>()
+    private fun graph(vararg deps: Pair<String, String>): AdjacencyList<Node, DependencyCondition> {
+        val g = AdjacencyList<Node, DependencyCondition>()
         val indices = mutableMapOf<String, Int>()
         fun indexOf(name: String): Int = indices.getOrPut(name) { g.push(node(name)) }
         for ((from, to) in deps) {
-            g.connect(indexOf(from), indexOf(to), Unit)
+            g.connect(indexOf(from), indexOf(to), DependencyCondition.COMPLETED)
         }
         return g
     }

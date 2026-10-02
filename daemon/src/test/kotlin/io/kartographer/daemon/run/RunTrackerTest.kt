@@ -1,6 +1,7 @@
 package io.kartographer.daemon.run
 
 import io.kartographer.daemon.proto.queryRunsRequest
+import io.kartographer.daemon.proto.TaskExecutionState
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -29,12 +30,15 @@ class RunTrackerTest {
 
         val taskInfo = activeRun.getTasks(0)
         assertEquals("flutter:run", taskInfo.taskName)
-        assertEquals("RUNNING", taskInfo.state)
+        assertEquals(TaskExecutionState.TASK_RUNNING, taskInfo.state)
         assertEquals("ws://127.0.0.1:41234/ws", taskInfo.outputsMap["debugEndpoint"])
         assertEquals("***", taskInfo.outputsMap["token"])
 
         // Complete task and run
-        tracker.onTaskCompleted("run-1", "flutter:run", "flutter:run", "COMPLETED", mapOf("debugEndpoint" to "ws://127.0.0.1:41234/ws"))
+        tracker.onTaskCompleted(
+            "run-1", "flutter:run", "flutter:run", TaskExecutionState.TASK_COMPLETED,
+            mapOf("debugEndpoint" to "ws://127.0.0.1:41234/ws")
+        )
         tracker.onRunCompleted("run-1", "COMPLETED")
 
         val afterActiveQuery = tracker.queryRuns(queryRunsRequest { activeOnly = true })

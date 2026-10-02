@@ -2,12 +2,14 @@ package io.kartographer.daemon.project
 
 import io.kartographer.core.model.Node
 import io.kartographer.core.model.Task
+import io.kartographer.core.model.TaskLifecycle
 import io.kartographer.core.scheduler.describeInvocationGraph
 import io.kartographer.daemon.proto.DescribeProjectResponse
 import io.kartographer.daemon.proto.describeProjectResponse
 import io.kartographer.daemon.proto.nodeInfo
 import io.kartographer.daemon.proto.propertyInfo
 import io.kartographer.daemon.proto.resolvedNode
+import io.kartographer.daemon.proto.resolvedDependency
 
 /**
  * Flattens a loaded pipeline into the wire form `karto tasks`, `karto graph` and
@@ -38,6 +40,10 @@ object ProjectDescription {
                         if (node is Task<*, *>) {
                             requiresElevation = node.requiresElevation
                             alwaysRuns = node.alwaysRuns
+                            lifecycle = when (node.lifecycle) {
+                                TaskLifecycle.FINITE -> io.kartographer.daemon.proto.TaskLifecycle.TASK_FINITE
+                                TaskLifecycle.SERVICE -> io.kartographer.daemon.proto.TaskLifecycle.TASK_SERVICE
+                            }
                         }
                         properties.addAll(propertiesOf(node))
                     }
@@ -54,7 +60,21 @@ object ProjectDescription {
                             name = node.displayName
                             invocationId = node.invocationId
                             displayName = node.displayName
-                            dependencies.addAll(node.dependencies)
+                            lifecycle = if (node.lifecycle == TaskLifecycle.SERVICE)
+                                io.kartographer.daemon.proto.TaskLifecycle.TASK_SERVICE
+                            else io.kartographer.daemon.proto.TaskLifecycle.TASK_FINITE
+                            dependencies.addAll(node.dependencies.map { dependency ->
+                                resolvedDependency {
+                                    invocationId = dependency.invocationId
+                                    displayName = dependency.displayName
+                                    condition = when (dependency.condition) {
+                                        io.kartographer.core.model.DependencyCondition.READY ->
+                                            io.kartographer.daemon.proto.DependencyCondition.DEPENDENCY_READY
+                                        io.kartographer.core.model.DependencyCondition.COMPLETED ->
+                                            io.kartographer.daemon.proto.DependencyCondition.DEPENDENCY_COMPLETED
+                                    }
+                                }
+                            })
                         }
                     )
                 }

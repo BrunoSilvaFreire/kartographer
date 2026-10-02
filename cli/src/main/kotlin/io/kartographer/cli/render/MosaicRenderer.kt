@@ -18,6 +18,7 @@ import io.kartographer.cli.render.graph.LayeredLayout
 import io.kartographer.core.model.ExecutionEvent
 import io.kartographer.core.model.ExecutionResult
 import io.kartographer.core.model.Node
+import io.kartographer.core.model.DependencyCondition
 import io.kartographer.core.model.graph.AdjacencyList
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.Channel
@@ -31,7 +32,7 @@ private const val MAX_LOG_LINES = 100
 private const val DETAIL_LOG_LINES = 20
 
 enum class TaskStatus {
-    QUEUED, RUNNING, SUCCESS, UP_TO_DATE, FAILED
+    QUEUED, RUNNING, READY, STOPPED, SUCCESS, UP_TO_DATE, FAILED
 }
 
 private fun statusLabel(status: TaskStatus) = when (status) {
@@ -43,7 +44,8 @@ private fun statusLabel(status: TaskStatus) = when (status) {
 
 private fun statusColor(status: TaskStatus): Color = when (status) {
     TaskStatus.RUNNING -> Color.Yellow
-    TaskStatus.SUCCESS, TaskStatus.UP_TO_DATE -> Color.Green
+    TaskStatus.READY, TaskStatus.SUCCESS, TaskStatus.UP_TO_DATE -> Color.Green
+    TaskStatus.STOPPED -> Color(120, 120, 120)
     TaskStatus.FAILED -> Color.Red
     TaskStatus.QUEUED -> Color(120, 120, 120)
 }
@@ -54,6 +56,8 @@ private object SpinnerTick
 
 private fun statusGlyph(status: TaskStatus, spinnerFrame: Int): String = when (status) {
     TaskStatus.RUNNING -> SPINNER_FRAMES[spinnerFrame % SPINNER_FRAMES.size]
+    TaskStatus.READY -> "●"
+    TaskStatus.STOPPED -> "■"
     TaskStatus.SUCCESS -> "✓"
     TaskStatus.UP_TO_DATE -> "="
     TaskStatus.FAILED -> "✗"
@@ -73,7 +77,7 @@ data class PipelineViewState(
     val tasks: Map<String, TaskViewState> = emptyMap(),
     val isFinished: Boolean = false,
     val finalResult: ExecutionResult<*>? = null,
-    val graph: AdjacencyList<Node, Unit>? = null,
+    val graph: AdjacencyList<Node, DependencyCondition>? = null,
     val navOrder: List<String> = emptyList()
 )
 
@@ -102,6 +106,20 @@ internal fun reduce(state: PipelineViewState, event: ExecutionEvent): PipelineVi
         val tvs = tasks[event.task.name] ?: TaskViewState(event.task.name)
         tasks[event.task.name] = tvs.copy(status = TaskStatus.RUNNING)
         state.copy(tasks = tasks)
+    }
+
+    is ExecutionEvent.TaskReady -> {
+        val tasks = state.tasks.toMutableMap()
+        val tvs = tasks[event.task.name] ?: TaskViewState(event.task.name)
+        tasks[event.task.name] = tvs.copy(status = TaskStatus.READY, outputs = event.outputs)
+        state.copy(tasks = tasks)
+    }
+
+    is ExecutionEvent.TaskStopped -> {
+        val tasks = state.tasks.toMutableMap()
+        val tvs = tasks[event.task.name] ?: TaskViewState(event.task.name)
+        tasks[event.task.name] = tvs.copy(status = TaskStatus.STOPPED, outputs = event.outputs)
+        state.copy(tasks = tasks, completedCount = state.completedCount + 1)
     }
 
     is ExecutionEvent.TaskOutput -> {
@@ -145,7 +163,7 @@ internal fun reduce(state: PipelineViewState, event: ExecutionEvent): PipelineVi
 }
 
 /** Dependency-first ordering of node names, so navigation walks upstream tasks first. */
-private fun topoOrder(graph: AdjacencyList<Node, Unit>): List<String> {
+private fun topoOrder(graph: AdjacencyList<Node, DependencyCondition>): List<String> {
     val visited = mutableSetOf<Int>()
     val order = mutableListOf<String>()
 
@@ -398,7 +416,9 @@ class MosaicRenderer : Renderer, PromptRenderer {
     @Composable
     private fun SummaryPane(state: PipelineViewState) {
         Text("Summary:")
-        val completed = state.tasks.values.filter { it.status != TaskStatus.QUEUED && it.status != TaskStatus.RUNNING }
+        val completed = state.tasks.values.filter {
+            it.status !in setOf(TaskStatus.QUEUED, TaskStatus.RUNNING, TaskStatus.READY)
+        }
         val width = completed.maxOfOrNull { it.name.length } ?: 0
         for (task in completed) {
             Text(" ${task.name.padEnd(width)}  ${statusLabel(task.status)}", color = statusColor(task.status))

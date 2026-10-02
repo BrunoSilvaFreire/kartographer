@@ -124,6 +124,15 @@ fun group(name: String, block: GroupSpec.() -> Unit): GroupSpec {
     return spec
 }
 
+/**
+ * Names a resource that tasks may only hold one (or [permits]) at a time.
+ *
+ * Just a name and a count — the run builds the real semaphore from whichever tasks in the
+ * plan acquire it, so declaring one nothing acquires costs nothing.
+ */
+fun semaphore(name: String, permits: Int = 1): io.kartographer.core.model.SemaphoreHandle =
+    io.kartographer.core.model.SemaphoreHandle(name, permits)
+
 object ProjectConfig {
     var projectRoot: String?
         get() = TaskRegistry.current.projectRoot

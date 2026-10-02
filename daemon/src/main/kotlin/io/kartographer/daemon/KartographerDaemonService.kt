@@ -202,6 +202,14 @@ class KartographerDaemonService(
         val taskName = request.taskName.replace(Regex("[^a-zA-Z0-9_-]"), "_")
         val logFile = resolveLogFile(runId, taskName)
 
+        if (request.lifecycle == io.kartographer.daemon.proto.TaskLifecycle.TASK_SERVICE) {
+            return executeTaskResponse {
+                status = ExecuteTaskResponse.Status.FAILURE
+                errorMessage = "Service task '${request.taskName}' cannot use unary remote execution."
+                exitCode = 1
+            }
+        }
+
         return try {
             logFile.parentFile.mkdirs()
             logFile.writeText("=== Kartographer Task Execution Log ===\n")

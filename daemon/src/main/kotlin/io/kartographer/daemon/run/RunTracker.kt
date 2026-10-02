@@ -4,6 +4,7 @@ import io.kartographer.daemon.proto.QueryRunsRequest
 import io.kartographer.daemon.proto.QueryRunsResponse
 import io.kartographer.daemon.proto.RunInfo
 import io.kartographer.daemon.proto.TaskExecutionInfo
+import io.kartographer.daemon.proto.TaskExecutionState
 import io.kartographer.daemon.proto.queryRunsResponse
 import io.kartographer.daemon.proto.runInfo
 import io.kartographer.daemon.proto.taskExecutionInfo
@@ -16,7 +17,7 @@ class RunTracker(private val maxRecentRuns: Int = 50) {
     data class TaskState(
         val invocationId: String,
         val taskName: String,
-        @Volatile var state: String = "QUEUED",
+        @Volatile var state: TaskExecutionState = TaskExecutionState.TASK_QUEUED,
         @Volatile var startedAtMillis: Long = 0L,
         @Volatile var completedAtMillis: Long = 0L,
         val outputs: ConcurrentHashMap<String, String> = ConcurrentHashMap(),
@@ -66,13 +67,13 @@ class RunTracker(private val maxRecentRuns: Int = 50) {
 
     fun onTaskQueued(runId: String, invocationId: String, taskName: String) {
         val run = activeRuns[runId] ?: return
-        run.tasks.computeIfAbsent(invocationId) { TaskState(invocationId, taskName, state = "QUEUED") }
+        run.tasks.computeIfAbsent(invocationId) { TaskState(invocationId, taskName, state = TaskExecutionState.TASK_QUEUED) }
     }
 
     fun onTaskStarted(runId: String, invocationId: String, taskName: String) {
         val run = activeRuns[runId] ?: return
         val task = run.tasks.computeIfAbsent(invocationId) { TaskState(invocationId, taskName) }
-        task.state = "RUNNING"
+        task.state = TaskExecutionState.TASK_RUNNING
         task.startedAtMillis = System.currentTimeMillis()
     }
 
@@ -82,11 +83,26 @@ class RunTracker(private val maxRecentRuns: Int = 50) {
         task.outputs[name] = if (isSecret) "***" else value
     }
 
+    fun onTaskReady(runId: String, invocationId: String, taskName: String, outputs: Map<String, String>) {
+        val run = activeRuns[runId] ?: return
+        val task = run.tasks.computeIfAbsent(invocationId) { TaskState(invocationId, taskName) }
+        task.state = TaskExecutionState.TASK_READY
+        task.outputs.putAll(outputs)
+    }
+
+    fun onTaskStopped(runId: String, invocationId: String, taskName: String, outputs: Map<String, String>) {
+        val run = activeRuns[runId] ?: return
+        val task = run.tasks.computeIfAbsent(invocationId) { TaskState(invocationId, taskName) }
+        task.state = TaskExecutionState.TASK_STOPPED
+        task.completedAtMillis = System.currentTimeMillis()
+        task.outputs.putAll(outputs)
+    }
+
     fun onTaskCompleted(
         runId: String,
         invocationId: String,
         taskName: String,
-        state: String,
+        state: TaskExecutionState,
         outputs: Map<String, String>,
         errorMessage: String = ""
     ) {

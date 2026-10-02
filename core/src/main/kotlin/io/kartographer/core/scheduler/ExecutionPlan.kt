@@ -1,6 +1,7 @@
 package io.kartographer.core.scheduler
 
 import io.kartographer.core.model.ConfiguredDependency
+import io.kartographer.core.model.DependencyCondition
 import io.kartographer.core.model.InputSet
 import io.kartographer.core.model.Node
 import io.kartographer.core.model.OutputSet
@@ -20,15 +21,20 @@ internal class InvocationNode(
 internal data class ExecutionPlan(
     val target: Node,
     val nodes: Set<Node>,
-    val dependencies: Map<Node, Set<Node>>,
+    val dependencies: Map<Node, Set<PlannedDependency>>,
     val invocations: Map<String, InvocationNode>
 )
+
+internal data class PlannedDependency(val node: Node, val condition: DependencyCondition)
 
 data class InvocationGraphNode(
     val invocationId: String,
     val displayName: String,
-    val dependencies: List<String>
+    val dependencies: List<InvocationGraphDependency>,
+    val lifecycle: io.kartographer.core.model.TaskLifecycle
 )
+
+data class InvocationGraphDependency(val invocationId: String, val displayName: String, val condition: DependencyCondition)
 
 fun describeInvocationGraph(registry: Map<TaskId, Node>): List<InvocationGraphNode> {
     val builder = ExecutionPlanBuilder(registry)
@@ -39,19 +45,20 @@ fun describeInvocationGraph(registry: Map<TaskId, Node>): List<InvocationGraphNo
             described[node.executionId] = InvocationGraphNode(
                 node.executionId,
                 node.name,
-                plan.dependencies[node].orEmpty().map { it.executionId }.sorted()
+                plan.dependencies[node].orEmpty().map {
+                    InvocationGraphDependency(it.node.executionId, it.node.name, it.condition)
+                }.sortedBy { it.displayName },
+                if (node is InvocationNode) node.task.lifecycle else io.kartographer.core.model.TaskLifecycle.FINITE
             )
         }
     }
-    return described.values.map { node ->
-        node.copy(dependencies = node.dependencies.map { described[it]?.displayName ?: it })
-    }.sortedBy { it.displayName }
+    return described.values.sortedBy { it.displayName }
 }
 
 internal class ExecutionPlanBuilder(private val registry: Map<TaskId, Node>) {
     private val defaults = mutableMapOf<Task<*, *>, InvocationNode>()
     private val configured = mutableMapOf<String, InvocationNode>()
-    private val dependencies = linkedMapOf<Node, Set<Node>>()
+    private val dependencies = linkedMapOf<Node, Set<PlannedDependency>>()
 
     fun build(target: Node): ExecutionPlan {
         val targetNode = materialize(target)
@@ -64,13 +71,13 @@ internal class ExecutionPlanBuilder(private val registry: Map<TaskId, Node>) {
             }
             if (!closure.add(node)) return
             path.add(node)
-            dependenciesFor(node).forEach { visit(it, path) }
+            dependenciesFor(node).forEach { visit(it.node, path) }
             path.removeAt(path.lastIndex)
         }
 
         visit(targetNode, mutableListOf())
         val selected = dependencies.filterKeys { it in closure }
-            .mapValues { (_, deps) -> deps.filterTo(linkedSetOf()) { it in closure } }
+            .mapValues { (_, deps) -> deps.filterTo(linkedSetOf()) { it.node in closure } }
         return ExecutionPlan(targetNode, closure, selected, defaults.values.associateBy { it.ref.id } + configured)
     }
 
@@ -99,15 +106,40 @@ internal class ExecutionPlanBuilder(private val registry: Map<TaskId, Node>) {
             ?: throw MissingDependencyException(ref.displayName, ref.id)
     }
 
-    private fun dependenciesFor(node: Node): Set<Node> = dependencies.getOrPut(node) {
+    private fun dependenciesFor(node: Node): Set<PlannedDependency> = dependencies.getOrPut(node) {
         val declaration = if (node is InvocationNode) node.task else node
-        linkedSetOf<Node>().apply {
+        linkedMapOf<Node, DependencyCondition>().apply {
+            fun natural(target: Node): DependencyCondition =
+                if ((target as? InvocationNode)?.task?.lifecycle == io.kartographer.core.model.TaskLifecycle.SERVICE ||
+                    (target as? Task<*, *>)?.lifecycle == io.kartographer.core.model.TaskLifecycle.SERVICE
+                ) DependencyCondition.READY else DependencyCondition.COMPLETED
+            fun add(target: Node, condition: DependencyCondition = natural(target)) {
+                merge(target, condition) { old, new ->
+                    if (old == DependencyCondition.COMPLETED || new == DependencyCondition.COMPLETED)
+                        DependencyCondition.COMPLETED else DependencyCondition.READY
+                }
+            }
             declaration.dependencyObjects.forEach { add(materialize(it)) }
             declaration.dependencyNames.forEach { name ->
                 add(materialize(registry[TaskId(name)] ?: throw MissingDependencyException(declaration.name, name)))
             }
-            declaration.configuredDependencies.forEach { add(configuredInvocation(it)) }
+            declaration.configuredDependencies.forEach {
+                add(
+                    configuredInvocation(it),
+                    if (it.forceCompletion) DependencyCondition.COMPLETED else natural(configuredInvocation(it))
+                )
+            }
             declaration.invocationDependencies.forEach { add(invocation(it)) }
+            declaration.completionDependencyObjects.forEach { add(materialize(it), DependencyCondition.COMPLETED) }
+            declaration.completionDependencyNames.forEach { name ->
+                add(
+                    materialize(registry[TaskId(name)] ?: throw MissingDependencyException(declaration.name, name)),
+                    DependencyCondition.COMPLETED
+                )
+            }
+            declaration.completionInvocationDependencies.forEach {
+                add(invocation(it), DependencyCondition.COMPLETED)
+            }
 
             if (declaration is Task<*, *>) {
                 declaration.registeredProperties.forEach { property ->
@@ -115,6 +147,6 @@ internal class ExecutionPlanBuilder(private val registry: Map<TaskId, Node>) {
                         ?: property.producingTask?.let { add(defaultInvocation(it)) }
                 }
             }
-        }
+        }.mapTo(linkedSetOf()) { PlannedDependency(it.key, it.value) }
     }
 }

@@ -1,6 +1,7 @@
 package io.kartographer.cli.render.graph
 
 import io.kartographer.core.model.Node
+import io.kartographer.core.model.DependencyCondition
 import io.kartographer.core.model.graph.AdjacencyList
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -10,12 +11,12 @@ private class TestNode(name: String) : Node(name)
 
 class LayeredLayoutTest {
 
-    private fun graph(vararg deps: Pair<String, String>): AdjacencyList<Node, Unit> {
-        val g = AdjacencyList<Node, Unit>()
+    private fun graph(vararg deps: Pair<String, String>): AdjacencyList<Node, DependencyCondition> {
+        val g = AdjacencyList<Node, DependencyCondition>()
         val indices = mutableMapOf<String, Int>()
         fun indexOf(name: String): Int = indices.getOrPut(name) { g.push(TestNode(name)) }
         for ((from, to) in deps) {
-            g.connect(indexOf(from), indexOf(to), Unit)
+            g.connect(indexOf(from), indexOf(to), DependencyCondition.COMPLETED)
         }
         return g
     }

@@ -11,7 +11,15 @@ import io.kartographer.core.model.TopologyRequirement
 import io.kartographer.core.model.UserPrompter
 import io.kartographer.core.model.Worker
 import io.kartographer.core.model.WorkerId
+import io.kartographer.core.logs.FileTaskLogStore
+import io.kartographer.core.logs.TaskLogBackend
+import io.kartographer.core.logs.TaskLogConfig
+import io.kartographer.core.logs.TaskLogObserver
+import io.kartographer.core.logs.TaskLogSink
+import io.kartographer.core.logs.selectBackends
 import io.kartographer.core.scheduler.ConcurrentScheduler
+import io.kartographer.daemon.logs.EventLogSink
+import io.kartographer.daemon.logs.JournaldSink
 import io.kartographer.daemon.project.LoadedProject
 import io.kartographer.daemon.project.Nodes
 import io.kartographer.daemon.project.TaskProperties
@@ -29,6 +37,10 @@ import io.kartographer.daemon.proto.taskCompleted
 import io.kartographer.daemon.proto.taskOutput
 import io.kartographer.daemon.proto.taskQueued
 import io.kartographer.daemon.proto.taskStarted
+import io.kartographer.daemon.proto.taskReady
+import io.kartographer.daemon.proto.taskStopped
+import io.kartographer.daemon.proto.resolvedDependency
+import io.kartographer.daemon.proto.TaskExecutionState
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -38,6 +50,7 @@ import org.slf4j.LoggerFactory
 import io.kartographer.daemon.proto.taskOutputProduced
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
@@ -106,13 +119,16 @@ class RunSession(
         val projectDir = resolveProjectDir()
         runTracker?.onRunStarted(runId, projectDir.toString(), start.taskName)
 
+        // The daemon's own environment is whatever launched it, which is not the shell the
+        // user typed in — the client's environment wins. The same merged map drives logging.
+        val mergedEnvironment = System.getenv() + start.context.environmentMap
+        val logSinks = openTaskLogSinks(projectDir, TaskLogConfig.from(mergedEnvironment), runId)
+
         val context = ExecutionContext(
             projectDir = projectDir,
-            // The daemon's own environment is whatever launched it, which is not the shell the
-            // user typed in — the client's environment wins.
-            environment = System.getenv() + start.context.environmentMap,
+            environment = mergedEnvironment,
             worker = worker,
-            observer = StreamObserver(runId),
+            observer = TaskLogObserver(StreamObserver(runId), runId, logSinks),
             dryRun = start.dryRun,
             runId = runId,
             prompter = StreamPrompter(task = null),
@@ -120,6 +136,7 @@ class RunSession(
         )
 
         if (!collectElevationSecret(executionSet, context)) {
+            closeTaskLogSinks(logSinks)
             runTracker?.onRunCompleted(runId, "FAILED")
             return
         }
@@ -145,10 +162,21 @@ class RunSession(
             }
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             runTracker?.onRunCompleted(runId, "CANCELLED")
-            throw cancelled
+            withContext(kotlinx.coroutines.NonCancellable) {
+                emit(runServerMessage {
+                    pipelineCompleted = pipelineCompleted {
+                        status = RunStatus.RUN_CANCELLED
+                        errorMessage = "Run cancelled"
+                        exitCode = 130
+                    }
+                })
+            }
+            return
         } catch (e: Exception) {
             runTracker?.onRunCompleted(runId, "FAILED")
             throw e
+        } finally {
+            closeTaskLogSinks(logSinks)
         }
 
         val finalRunStatus = when (result) {
@@ -212,6 +240,47 @@ class RunSession(
         return base.resolve(declaredRoot).normalize()
     }
 
+    /**
+     * Opens this run's log sinks, or an empty list when logging is off or cannot be set up.
+     *
+     * A read-only project directory (or any other setup failure) must never fail the run, so
+     * every failure degrades to "no logs" with a single warning.
+     */
+    private fun openTaskLogSinks(projectDir: Path, config: TaskLogConfig, runId: String): List<TaskLogSink> {
+        if (config.backend == TaskLogBackend.OFF) return emptyList()
+        return try {
+            val store = FileTaskLogStore(projectDir.resolve(".kartographer/logs/runs"), config)
+            store.prune(Instant.now())
+
+            val osName = System.getProperty("os.name") ?: ""
+            // TODO: skip native probes when backend=FILE, and cache JournaldSink's loaded library instead of Native.load on every probe/open per run.
+            val journaldAvailable = JournaldSink.isAvailable()
+            val eventLogAvailable = EventLogSink.isAvailable()
+            if (config.backend == TaskLogBackend.JOURNALD && !journaldAvailable) {
+                logger.warn("KARTO_LOG_BACKEND=journald requested but journald is unavailable; writing file logs only.")
+            }
+            if (config.backend == TaskLogBackend.EVENTLOG && !eventLogAvailable) {
+                logger.warn("KARTO_LOG_BACKEND=eventlog requested but the Windows Event Log is unavailable; writing file logs only.")
+            }
+
+            selectBackends(config, osName, journaldAvailable, eventLogAvailable).mapNotNull { backend ->
+                when (backend) {
+                    TaskLogBackend.FILE -> store.openRun(runId, Instant.now())
+                    TaskLogBackend.JOURNALD -> JournaldSink.open()
+                    TaskLogBackend.EVENTLOG -> EventLogSink.open()
+                    TaskLogBackend.AUTO, TaskLogBackend.OFF -> null
+                }
+            }
+        } catch (e: Exception) {
+            logger.warn("Task logging is unavailable for this run: {}", e.toString())
+            emptyList()
+        }
+    }
+
+    private fun closeTaskLogSinks(sinks: List<TaskLogSink>) {
+        for (sink in sinks) runCatching { sink.close() }
+    }
+
     private fun satisfiesTopology(node: Node, worker: Worker): Boolean {
         if (node !is Task<*, *>) return true
         return node.topologyRequirements.all { requirement ->
@@ -249,6 +318,26 @@ class RunSession(
                     runTracker?.onTaskStarted(runId, event.task.executionId, event.task.name)
                     runServerMessage { taskStarted = taskStarted { task = event.task.name; invocationId = event.task.executionId } }
                 }
+                is ExecutionEvent.TaskReady -> {
+                    runTracker?.onTaskReady(runId, event.task.executionId, event.task.name, event.outputs)
+                    runServerMessage {
+                        taskReady = taskReady {
+                            task = event.task.name
+                            invocationId = event.task.executionId
+                            outputs.putAll(event.outputs)
+                        }
+                    }
+                }
+                is ExecutionEvent.TaskStopped -> {
+                    runTracker?.onTaskStopped(runId, event.task.executionId, event.task.name, event.outputs)
+                    runServerMessage {
+                        taskStopped = taskStopped {
+                            task = event.task.name
+                            invocationId = event.task.executionId
+                            outputs.putAll(event.outputs)
+                        }
+                    }
+                }
                 is ExecutionEvent.TaskOutput -> runServerMessage {
                     taskOutput = taskOutput {
                         task = event.task.name
@@ -271,9 +360,8 @@ class RunSession(
                 }
                 is ExecutionEvent.TaskCompleted -> {
                     val taskState = when (event.result) {
-                        is ExecutionResult.Success<*> -> "COMPLETED"
-                        is ExecutionResult.UpToDate<*> -> "UP_TO_DATE"
-                        is ExecutionResult.Failure<*> -> "FAILED"
+                        is ExecutionResult.Success<*>, is ExecutionResult.UpToDate<*> -> TaskExecutionState.TASK_COMPLETED
+                        is ExecutionResult.Failure<*> -> TaskExecutionState.TASK_FAILED
                     }
                     val errMsg = (event.result as? ExecutionResult.Failure<*>)?.error?.localizedMessage ?: ""
                     runTracker?.onTaskCompleted(runId, event.task.executionId, event.task.name, taskState, event.outputs, errMsg)
@@ -309,9 +397,19 @@ class RunSession(
                     name = node.name
                     invocationId = node.executionId
                     displayName = node.name
-                    dependencies.addAll(
-                        event.graph.edgesFrom(index).keys.mapNotNull { event.graph.vertex(it)?.name }
-                    )
+                    lifecycle = if (node.lifecycle == io.kartographer.core.model.TaskLifecycle.SERVICE)
+                        io.kartographer.daemon.proto.TaskLifecycle.TASK_SERVICE
+                    else io.kartographer.daemon.proto.TaskLifecycle.TASK_FINITE
+                    dependencies.addAll(event.graph.edgesFrom(index).mapNotNull { (dependencyIndex, condition) ->
+                        val dependency = event.graph.vertex(dependencyIndex) ?: return@mapNotNull null
+                        resolvedDependency {
+                            invocationId = dependency.executionId
+                            displayName = dependency.name
+                            this.condition = if (condition == io.kartographer.core.model.DependencyCondition.READY)
+                                io.kartographer.daemon.proto.DependencyCondition.DEPENDENCY_READY
+                            else io.kartographer.daemon.proto.DependencyCondition.DEPENDENCY_COMPLETED
+                        }
+                    })
                 }
             }
     }

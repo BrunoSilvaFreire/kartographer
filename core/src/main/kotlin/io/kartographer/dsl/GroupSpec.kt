@@ -48,4 +48,11 @@ class GroupSpec(val group: Group) {
     fun <I : io.kartographer.core.model.InputSet, O : io.kartographer.core.model.OutputSet> dependsOn(
         task: Task<I, O>
     ): O = group.dependsOn(task)
+
+    fun <I : io.kartographer.core.model.InputSet, O : io.kartographer.core.model.OutputSet> dependsOnCompletion(
+        task: Task<I, O>,
+        configure: (I) -> Unit
+    ): O = group.dependsOnCompletion(task, configure)
+
+    fun dependsOnCompletion(vararg nodes: Node) = group.dependsOnCompletion(*nodes)
 }

@@ -16,6 +16,8 @@ import io.kartographer.cli.render.PromptAnswer
 import io.kartographer.cli.render.PromptRenderer
 import io.kartographer.cli.render.PromptRequest
 import io.kartographer.cli.render.Renderer
+import io.kartographer.core.logs.FileTaskLogStore
+import io.kartographer.core.logs.TaskLogConfig
 import io.kartographer.core.model.ExecutionResult
 import io.kartographer.daemon.proto.DescribeProjectResponse
 import io.kartographer.daemon.proto.NodeInfo
@@ -59,6 +61,10 @@ class ClientContext(
         // user did not name a directory explicitly.
         projectDirExplicit = projectDirOption != null
     }
+
+    /** The project directory the CLI was pointed at, resolved the same way as [toProto]. */
+    fun projectDirPath(): java.nio.file.Path =
+        Paths.get(projectDirOption ?: "").toAbsolutePath().normalize()
 }
 
 class KartographerCommand : CliktCommand(name = "kartographer", invokeWithoutSubcommand = false) {
@@ -110,23 +116,32 @@ class TasksCommand : CliktCommand(name = "tasks", help = "List all registered no
             return if (flags.isEmpty()) "-" else flags.joinToString(", ") { "--$it" }
         }
 
+        fun lifecycle(node: NodeInfo): String = when {
+            !node.isTask -> "group"
+            node.lifecycle == io.kartographer.daemon.proto.TaskLifecycle.TASK_SERVICE -> "service"
+            else -> "finite"
+        }
+
         val nodes = project.nodesList
         val maxFullNameLen = maxOf(14, nodes.maxOf { it.name.length })
         val maxNameLen = maxOf(9, nodes.maxOf { it.name.substringAfterLast('/').length })
         val maxTypeLen = maxOf(4, nodes.maxOf { it.type.length })
+        val maxLifecycleLen = maxOf(9, nodes.maxOf { lifecycle(it).length })
         val maxCliArgsLen = maxOf(8, nodes.maxOf { cliArgs(it).length })
 
         echo(
             "${"FULL TASK NAME".padEnd(maxFullNameLen)}   ${"TASK NAME".padEnd(maxNameLen)}   " +
-                "${"TYPE".padEnd(maxTypeLen)}   ${"CLI ARGS".padEnd(maxCliArgsLen)}   DEPENDENCIES"
+                "${"TYPE".padEnd(maxTypeLen)}   ${"LIFECYCLE".padEnd(maxLifecycleLen)}   " +
+                "${"CLI ARGS".padEnd(maxCliArgsLen)}   DEPENDENCIES"
         )
-        echo("-".repeat(maxFullNameLen + maxNameLen + maxTypeLen + maxCliArgsLen + 23))
+        echo("-".repeat(maxFullNameLen + maxNameLen + maxTypeLen + maxLifecycleLen + maxCliArgsLen + 26))
 
         for (node in nodes) {
             val deps = if (node.dependenciesList.isEmpty()) "-" else node.dependenciesList.joinToString(", ")
             echo(
                 "${node.name.padEnd(maxFullNameLen)}   ${node.name.substringAfterLast('/').padEnd(maxNameLen)}   " +
-                    "${node.type.padEnd(maxTypeLen)}   ${cliArgs(node).padEnd(maxCliArgsLen)}   $deps"
+                    "${node.type.padEnd(maxTypeLen)}   ${lifecycle(node).padEnd(maxLifecycleLen)}   " +
+                    "${cliArgs(node).padEnd(maxCliArgsLen)}   $deps"
             )
         }
     }
@@ -151,7 +166,11 @@ class GraphCommand : CliktCommand(name = "graph", help = "Display the task depen
             if (node.dependenciesList.isEmpty()) {
                 echo("  ${node.name}")
             } else {
-                echo("  ${node.name} -> [${node.dependenciesList.joinToString()}]")
+                val dependencies = node.dependenciesList.joinToString { dependency ->
+                    val condition = dependency.condition.name.removePrefix("DEPENDENCY_").lowercase()
+                    "${dependency.displayName} ($condition)"
+                }
+                echo("  ${node.name} -> [$dependencies]")
             }
         }
     }
@@ -504,7 +523,7 @@ class PsCommand : CliktCommand(name = "ps", help = "List active and recent pipel
                 """
                 {
                   "task": "${escapeJson(task.taskName)}",
-                  "state": "${escapeJson(task.state)}",
+                  "state": "${escapeJson(task.state.name)}",
                   "startedAt": ${task.startedAtMillis},
                   "completedAt": ${task.completedAtMillis},
                   "outputs": { $outputsJson }$errJson
@@ -579,6 +598,43 @@ class PreferencesCommand : CliktCommand(name = "preferences", help = "View or ch
     }
 }
 
+/**
+ * Reads the per-run logs the daemon writes under `<projectDir>/.kartographer/logs/runs`.
+ *
+ * This talks to the filesystem directly rather than the daemon: the same project directory is
+ * shared, so no new RPC is needed. Native journald/Event Log records are documented separately
+ * (see the README) because they need the host's own query tools.
+ */
+class LogsCommand : CliktCommand(name = "logs", help = "Show captured output from past task runs") {
+    private val clientContext by requireObject<ClientContext>()
+    private val runRef by argument(name = "run", help = "Run id or timestamp prefix (defaults to the latest run)").optional()
+    private val taskFilter by option("--task", help = "Only show lines produced by this task")
+    private val list by option("--list", help = "List stored runs instead of printing one").flag(default = false)
+
+    override fun run() {
+        val root = clientContext.projectDirPath().resolve(".kartographer/logs/runs")
+        val store = FileTaskLogStore(root, TaskLogConfig())
+
+        if (list) {
+            val runs = store.listRuns()
+            if (runs.isEmpty()) {
+                echo("No stored run logs in $root")
+                return
+            }
+            for (run in runs) {
+                echo("${run.name}  ${run.sizeBytes} bytes")
+            }
+            return
+        }
+
+        if (store.resolveRun(runRef) == null) {
+            echo("No stored run log matches '${runRef ?: "the latest run"}' in $root", err = true)
+            throw ProgramResult(1)
+        }
+        store.read(runRef, taskFilter).forEach { echo(it) }
+    }
+}
+
 fun main(args: Array<String>) {
     Timing.mark("main entered")
     val completeEnv = System.getenv().keys.firstOrNull { it.endsWith("_COMPLETE") }
@@ -589,7 +645,7 @@ fun main(args: Array<String>) {
     val newArgs = rewriteArgs(args.toList())
     Timing.mark("args rewritten")
     KartographerCommand()
-        .subcommands(TasksCommand(), GraphCommand(), RunCommand(), PsCommand(), StatusCommand(), PreferencesCommand())
+        .subcommands(TasksCommand(), GraphCommand(), RunCommand(), PsCommand(), StatusCommand(), PreferencesCommand(), LogsCommand())
         .main(newArgs)
     Timing.mark("command finished")
 }

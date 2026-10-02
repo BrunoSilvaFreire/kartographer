@@ -3,9 +3,14 @@ package io.kartographer.core.model
 import io.kartographer.core.model.graph.AdjacencyList
 
 sealed interface ExecutionEvent {
-    data class PipelineStarted(val totalTasks: Int, val graph: AdjacencyList<Node, Unit>) : ExecutionEvent
+    data class PipelineStarted(
+        val totalTasks: Int,
+        val graph: AdjacencyList<Node, DependencyCondition>
+    ) : ExecutionEvent
     data class TaskQueued(val task: Node) : ExecutionEvent
     data class TaskStarted(val task: Node) : ExecutionEvent
+    data class TaskReady(val task: Node, val outputs: Map<String, String> = emptyMap()) : ExecutionEvent
+    data class TaskStopped(val task: Node, val outputs: Map<String, String> = emptyMap()) : ExecutionEvent
     data class TaskOutput(val task: Node, val line: String, val isError: Boolean) : ExecutionEvent
     data class TaskCompleted(
         val task: Node,

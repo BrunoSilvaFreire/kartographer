@@ -1,6 +1,7 @@
 package io.kartographer.cli.render.graph
 
 import io.kartographer.core.model.Node
+import io.kartographer.core.model.DependencyCondition
 import io.kartographer.core.model.graph.AdjacencyList
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -20,7 +21,7 @@ import kotlin.math.roundToInt
  * diagonal slashes, which reads much more clearly at a glance.
  */
 class LayeredLayout(
-    val graph: AdjacencyList<Node, Unit>,
+    val graph: AdjacencyList<Node, DependencyCondition>,
     val maxWidth: Int = 160,
     val maxHeight: Int = 40,
 ) {

@@ -9,6 +9,7 @@ import io.kartographer.core.model.InputSet
 import io.kartographer.core.model.InputSetCodec
 import io.kartographer.core.model.OutputSetCodec
 import io.kartographer.core.plugins.TaskSerializer
+import io.kartographer.core.model.TaskLifecycle
 import io.kartographer.daemon.proto.*
 import io.kartographer.daemon.proto.KartographerDaemonGrpcKt.KartographerDaemonCoroutineStub
 import org.slf4j.LoggerFactory
@@ -35,6 +36,9 @@ class RemoteWorkerClient(private val host: String, private val port: Int) : Clos
         // default parameter value.
         inputSet: InputSet? = null
     ): ExecutionResult<*> {
+        require(task.lifecycle != TaskLifecycle.SERVICE) {
+            "Service task '${task.name}' cannot run on a remote worker; service execution requires streamed readiness and cancellation."
+        }
         @Suppress("NAME_SHADOWING")
         val inputSet = inputSet ?: task.buildInputsAny(context)
         val serializedProps = TaskSerializer.serializeProperties(task)
@@ -53,6 +57,7 @@ class RemoteWorkerClient(private val host: String, private val port: Int) : Clos
             dryRun = context.dryRun
             inputSetJson = InputSetCodec.canonical(inputSet)
             invocationId = context.invocationId ?: task.name
+            lifecycle = io.kartographer.daemon.proto.TaskLifecycle.TASK_FINITE
         }
 
         return try {
