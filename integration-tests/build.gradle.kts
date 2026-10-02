@@ -37,6 +37,14 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    // The local-plugin fixture builds a separate Gradle project that resolves
+    // io.kartographer:*:0.1.0-SNAPSHOT from mavenLocal. Publish every sibling module first,
+    // or a clean machine (CI) has nothing for that fixture to compile against.
+    rootProject.subprojects
+        .filter { it.path != project.path }
+        .forEach { sibling ->
+            dependsOn(sibling.tasks.matching { it.name == "publishToMavenLocal" })
+        }
     // Show test output in console
     testLogging {
         events("passed", "skipped", "failed")

@@ -77,7 +77,7 @@ class FlutterTestTaskTest {
 
         val cmd = capturedCommands.first()
         assertTrue(cmd.contains("test/specific_test.dart"))
-        assertTrue(cmd.contains("--name 'Widget.*'"))
+        assertTrue(cmd.contains("--name") && cmd.contains("Widget.*"))
         assertTrue(cmd.contains("--plain-name sub"))
         assertTrue(cmd.contains("--tags smoke"))
         assertTrue(cmd.contains("--exclude-tags backend"))

@@ -161,3 +161,12 @@ fun pipelineInputFile(path: String): String {
     TaskRegistry.current.pipelineInputFiles.add(file.path)
     return file.path
 }
+
+/**
+ * Resolves [path] against the pipeline's project directory rather than the process working
+ * directory, and records it as a pipeline input so its presence is part of cache invalidation.
+ *
+ * A bare `java.io.File("go.mod")` in a `.kts` would resolve against the daemon's CWD, which is
+ * not the project being built. Pipelines should use this helper for project-relative probes.
+ */
+fun projectFile(path: String): java.io.File = java.io.File(pipelineInputFile(path))

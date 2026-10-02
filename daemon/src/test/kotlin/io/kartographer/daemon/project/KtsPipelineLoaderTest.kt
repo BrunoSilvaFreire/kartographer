@@ -15,6 +15,8 @@ class KtsPipelineLoaderTest {
     @Test
     fun `loads a script into the supplied registry`() {
         val scriptContent = """
+            import io.kartographer.testing.ScriptedTask
+
             task<ScriptedTask>("compile") {
                 inputs.dir("src")
                 action { context ->

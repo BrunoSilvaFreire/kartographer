@@ -2,6 +2,61 @@
 
 Kartographer is a topology-aware Directed Acyclic Graph (DAG) task orchestrator. It allows you to define pipelines using a clean, type-safe Kotlin DSL, validate dependencies, and execute tasks locally while targeting specific hardware, operating system, or environment requirements.
 
+## Installation
+
+The `.deb` and `.msi` packages are self-contained (they bundle a trimmed Java runtime).
+The `.zip`/`.tar.gz` archives require **Java 21** on the system — no Gradle or Kotlin needed.
+
+### Debian / Ubuntu
+
+```bash
+sudo apt install ./kartographer_0.1.0_amd64.deb
+kartographer --help
+```
+
+### Windows (MSI)
+
+Download `kartographer-0.1.0.msi` from the release and run it, or from PowerShell:
+
+```powershell
+msiexec /i kartographer-0.1.0.msi
+kartographer.bat --help
+```
+
+### Linux / macOS (archive)
+
+```bash
+unzip kartographer-0.1.0.zip
+export PATH="$PWD/kartographer-0.1.0/bin:$PATH"
+kartographer --help
+```
+
+### Windows (archive)
+
+```powershell
+Expand-Archive kartographer-0.1.0.zip -DestinationPath .
+$env:PATH += ";$PWD\kartographer-0.1.0\bin"
+kartographer.bat --help
+```
+
+Every archive contains both launchers in `bin/`: `kartographer` (CLI) and
+`kartographer-daemon` (the long-lived process the CLI starts on demand). Keep them in the same
+`bin/` directory, next to `lib/`.
+
+### From source
+
+```bash
+./gradlew :dist:distZip          # default version 0.1.0-SNAPSHOT
+./gradlew :dist:distZip -Pversion=0.1.0
+./gradlew :dist:packageDeb       # Linux, needs jpackage + dpkg
+./gradlew :dist:packageMsi       # Windows, needs jpackage + WiX
+```
+
+`./bootstrap.sh` remains the developer path: it builds `installDist` and symlinks `kartographer`
+and `kartographer-daemon` into `~/.local/bin`.
+
+
+
 ## Why Topology-Aware DAG Orchestration?
 
 Modern build and workflow orchestrators often treat target executors as uniform or rely entirely on container isolation. However, in heterogeneous hybrid or edge environments, certain tasks require specific placement:

@@ -54,6 +54,14 @@ open class KartoDependenciesExtension @Inject constructor(private val project: P
         project.dependencies.add("implementation", "io.kartographer:ansible:$version")
     }
 
+    fun buf() {
+        project.dependencies.add("implementation", "io.kartographer:buf:$version")
+    }
+
+    fun github() {
+        project.dependencies.add("implementation", "io.kartographer:github:$version")
+    }
+
     fun api(dependencyNotation: String) {
         project.dependencies.add("implementation", dependencyNotation)
     }

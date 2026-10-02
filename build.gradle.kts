@@ -10,7 +10,8 @@ subprojects {
     apply(plugin = "maven-publish")
 
     group = "io.kartographer"
-    version = "0.1.0-SNAPSHOT"
+    // `-Pversion=0.1.0` overrides this for a release bundle; SNAPSHOT stays the default.
+    version = providers.gradleProperty("version").getOrElse("0.1.0-SNAPSHOT")
 
     plugins.withType<org.jetbrains.kotlin.gradle.plugin.KotlinPluginWrapper> {
         publishing {

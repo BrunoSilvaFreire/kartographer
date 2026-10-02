@@ -39,9 +39,11 @@ class LocalProtocolServerTest {
         return socket
     }
 
+    private val scriptHeader = "import io.kartographer.testing.ScriptedTask\n"
+
     private fun writeProject(dir: File, vararg tasks: String) {
         File(dir, "karto.kts").writeText(
-            tasks.joinToString("\n") { """task<ScriptedTask>("$it") { }""" }
+            scriptHeader + tasks.joinToString("\n") { """task<ScriptedTask>("$it") { }""" }
         )
     }
 
@@ -94,6 +96,8 @@ class LocalProtocolServerTest {
         val socket = startServer(dir)
         File(dir, "karto.kts").writeText(
             """
+            import io.kartographer.testing.ScriptedTask
+
             task<ScriptedTask>("boom") {
                 action { context ->
                     context.executeBash { command("sh"); args("-c", "exit 7") }
@@ -118,8 +122,12 @@ class LocalProtocolServerTest {
             while (true) {
                 val response = client.receive() ?: break
                 if (response.responseCase != LocalResponse.ResponseCase.RUN) continue
-                if (response.run.messageCase == RunServerMessage.MessageCase.PIPELINE_COMPLETED) {
-                    completed = response.run
+                val run = response.run
+                if (run.messageCase == RunServerMessage.MessageCase.ERROR) {
+                    error(run.error.message)
+                }
+                if (run.messageCase == RunServerMessage.MessageCase.PIPELINE_COMPLETED) {
+                    completed = run
                     break
                 }
             }
@@ -135,6 +143,8 @@ class LocalProtocolServerTest {
         val socket = startServer(dir)
         File(dir, "karto.kts").writeText(
             """
+            import io.kartographer.testing.ScriptedTask
+
             task<ScriptedTask>("talk") {
                 action { context ->
                     context.executeBash { command("sh"); args("-c", "echo hello-from-task") }
@@ -160,6 +170,9 @@ class LocalProtocolServerTest {
                 val response = client.receive() ?: break
                 if (response.responseCase != LocalResponse.ResponseCase.RUN) continue
                 val run = response.run
+                if (run.messageCase == RunServerMessage.MessageCase.ERROR) {
+                    error(run.error.message)
+                }
                 if (run.messageCase == RunServerMessage.MessageCase.TASK_OUTPUT) {
                     output.add(run.taskOutput.line)
                 }
@@ -193,6 +206,8 @@ class LocalProtocolServerTest {
         val socket = startServer(dir)
         File(dir, "karto.kts").writeText(
             """
+            import io.kartographer.testing.ScriptedTask
+
             task<ScriptedTask>("interactive") {
                 action { context ->
                     context.executeBash { command("sh"); args("-c", "read line; echo received-${'$'}{'$'}line") }

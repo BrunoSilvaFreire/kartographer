@@ -457,8 +457,8 @@ class RunSession(
 /** Capabilities the daemon advertises, matching the task modules on its classpath. */
 object DaemonCapabilities {
     val ALL = setOf(
-        "local-exec", "ansible", "apt", "dart", "docker", "flutter", "go", "gradle", "kubectl",
-        "protoc", "pulumi", "python"
+        "local-exec", "ansible", "apt", "buf", "dart", "docker", "flutter", "gh", "git", "go",
+        "gradle", "kubectl", "node", "protoc", "pulumi", "python"
     )
 }
 

@@ -8,6 +8,7 @@ import io.kartographer.core.model.WorkerId
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.nio.file.Paths
@@ -59,12 +60,12 @@ class KubernetesProvidersTest {
 
         assertEquals("hunter2", value)
         // No `| base64 -d`: a pipeline means a shell, and a shell means the
-        // decoded value can surface in a process listing.
-        assertEquals(
-            "kubectl --namespace=cityscape get secret cityscape-evaluator-oidc " +
-                "'--output=jsonpath={.data.client-secret}'",
-            recorder.commands.single(),
-        )
+        // decoded value can surface in a process listing. Assert the pieces rather than the
+        // exact quoting, which differs between sh and cmd.exe.
+        val command = recorder.commands.single()
+        assertTrue(command.startsWith("kubectl --namespace=cityscape get secret cityscape-evaluator-oidc"))
+        assertTrue(command.contains("--output=jsonpath={.data.client-secret}"))
+        assertFalse(command.contains("|"))
     }
 
     @Test
