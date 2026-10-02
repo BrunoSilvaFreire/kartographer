@@ -23,6 +23,8 @@ class ExecutionEventsStepDefinitions {
                 is ExecutionEvent.PipelineStarted -> "PipelineStarted"
                 is ExecutionEvent.TaskQueued -> "TaskQueued"
                 is ExecutionEvent.TaskStarted -> "TaskStarted"
+                is ExecutionEvent.TaskReady -> "TaskReady"
+                is ExecutionEvent.TaskStopped -> "TaskStopped"
                 is ExecutionEvent.TaskOutput -> "TaskOutput"
                 is ExecutionEvent.TaskOutputProduced -> "TaskOutputProduced"
                 is ExecutionEvent.TaskCompleted -> "TaskCompleted"
