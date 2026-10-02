@@ -93,6 +93,79 @@ class BasicPipeline {
 
 ---
 
+## Task Logs
+
+Every local `karto run` captures each task's stdout, stderr, exit status and duration to
+`<projectDir>/.kartographer/logs/runs/` (the same `.kartographer/` directory the up-to-date
+state uses). One file per run, named with a sortable UTC timestamp and the run id:
+
+```
+.kartographer/logs/runs/20260929T101530Z-3f2a...c1.log.gz
+```
+
+When the host supports it, the same records are also forwarded to the systemd journal (Linux) or
+the Windows Event Log, with structured fields. The message text is identical on every backend.
+Each line looks like:
+
+```
+2026-09-29T10:15:30.123Z run=<runId> task=<taskName> inv=<invocationId> stream=<out|err|meta> <text>
+```
+
+`stream=meta` carries `start` and, at the end of a task, `end status=<SUCCESS|UP_TO_DATE|FAILED>
+exit=<code|-> duration_ms=<n>`.
+
+### Configuration
+
+Set these environment variables in the shell that launches `karto` (they are read per run, so the
+daemon inherits the client's values):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `KARTO_LOG_BACKEND` | `auto` | `auto` (file + native if available), `file`, `journald`, `eventlog`, or `off` |
+| `KARTO_LOG_MAX_RUNS` | `50` | keep at most N run logs |
+| `KARTO_LOG_MAX_AGE_DAYS` | `14` | delete run logs older than this |
+| `KARTO_LOG_MAX_TOTAL_MB` | `500` | delete the oldest runs until the total is under this size |
+| `KARTO_LOG_COMPRESS` | `true` | gzip a run's log when the run finishes |
+
+The file store is written for every backend except `off`, because `karto logs` reads it. If an
+explicit `journald` or `eventlog` backend is not available on the host, one warning is logged and
+the run continues with file logs only. Rotation runs when a run starts: by age, then by count,
+then by total size, oldest first; the current run is never pruned.
+
+### Inspecting past runs
+
+```bash
+karto logs                      # the latest run
+karto logs <runId-prefix>       # a specific run, by run id or timestamp prefix
+karto logs --task <name>        # only that task's lines
+karto logs --list               # stored runs with their sizes
+```
+
+Native backends are queried with the host's own tools. Structured fields let you filter without
+grep:
+
+```bash
+# Linux
+journalctl -t karto KARTO_RUN_ID=<id>
+journalctl -t karto KARTO_TASK=<name> -o verbose
+journalctl -t karto -n 20 -o verbose
+
+# Windows PowerShell
+Get-WinEvent -FilterHashtable @{LogName='Application'; ProviderName='Kartographer'}
+```
+
+When the daemon runs inside your login session (rather than as a system service), records land in
+the per-user journal, so add `--user` (or point `--file` at the user journal file):
+
+```bash
+journalctl --user -t karto KARTO_RUN_ID=<id> -o verbose
+```
+
+> The Windows Event Log source is not registered (no message DLL), so Windows shows a
+> "description not found" preamble; the message text is still present.
+
+---
+
 ## Roadmap
 
 1. **Parallel Local Execution**: Use coroutines to execute independent DAG branches concurrently.
