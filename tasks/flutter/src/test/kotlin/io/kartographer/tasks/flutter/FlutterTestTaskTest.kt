@@ -4,6 +4,7 @@ import io.kartographer.core.model.*
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
+import java.io.File
 import java.nio.file.Files
 
 class FlutterTestTaskTest {
@@ -128,5 +129,49 @@ class FlutterTestTaskTest {
 
         assertTrue(result is ExecutionResult.Success)
         assertTrue(capturedCommands.isEmpty())
+    }
+
+    /**
+     * The regression guard for a run that dies before writing a report — a compile error, a
+     * crashed shader compiler. With no JSON to parse there are no failing test cases to
+     * count, and the task used to emit `success = true` while returning a failure.
+     */
+    @Test
+    fun `a crash with no report emits failure, not success`() = runBlocking {
+        for (isolated in listOf(false, true)) {
+            val task = FlutterTest("crashing-test")
+            task.isolateTargets.set(isolated)
+
+            val produced = mutableMapOf<String, String>()
+            val projectDir = Files.createTempDirectory("flutter-task-crash")
+            File(projectDir.resolve("test").toFile(), "").mkdirs()
+            File(projectDir.resolve("test").toFile(), "a_test.dart").writeText("void main() {}")
+            task.reportDir.set(projectDir.resolve("reports").toString())
+
+            val ctx = ExecutionContext(
+                projectDir = projectDir,
+                worker = Worker(WorkerId("test-worker"), capabilities = setOf("flutter")),
+                observer = object : ExecutionObserver {
+                    override fun onEvent(event: ExecutionEvent) {
+                        if (event is ExecutionEvent.TaskOutputProduced) produced[event.name] = event.value
+                    }
+                },
+                executionEnvironment = object : ExecutionEnvironment {
+                    override suspend fun execute(
+                        command: String,
+                        workingDir: String,
+                        environment: Map<String, String>,
+                        requiresElevation: Boolean
+                    ): Int = 1
+                },
+                task = task
+            )
+
+            val result = task.execute(ctx)
+
+            assertTrue(result is ExecutionResult.Failure, "isolateTargets=$isolated should fail")
+            assertEquals("false", produced["success"], "isolateTargets=$isolated")
+            assertEquals("1", produced["failedCount"], "isolateTargets=$isolated")
+        }
     }
 }

@@ -131,6 +131,22 @@ class DartTasksTest {
     }
 
     @Test
+    fun `test forwards tag filters`() = runBlocking {
+        val recorder = Recorder()
+        val task = DartTest("test").apply {
+            tags.set("backend")
+            excludeTags.set("slow")
+        }
+
+        task.execute(contextFor(recorder))
+
+        assertEquals(
+            "dart test --tags backend --exclude-tags slow",
+            recorder.commands.single(),
+        )
+    }
+
+    @Test
     fun `compile names its artifact as an output`() = runBlocking {
         val recorder = Recorder()
         val task = DartCompile("compile").apply {

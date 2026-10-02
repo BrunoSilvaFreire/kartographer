@@ -203,5 +203,124 @@ class FlutterTestReportTest {
         assertEquals(100, coverage!!.linesFound)
         assertEquals(80, coverage.linesHit)
         assertEquals(80.0, coverage.coveragePercent)
+        assertEquals(2, coverage.files.size)
+        assertEquals("lib/src/foo.dart", coverage.files[0].path)
+        assertEquals(20, coverage.files[0].linesFound)
+        assertEquals(15, coverage.files[0].linesHit)
+    }
+
+    /**
+     * The report the reader actually opens.
+     *
+     * It used to be produced by shelling out to `npx xunit-viewer`, which rendered a page
+     * with the right counts in the header and nothing at all in the body. Asserting that
+     * the test names and the failure text are in the file is what that never checked.
+     */
+    @Test
+    fun `html report contains the tests, the failures and the coverage`() {
+        val summary = FlutterTestReportParser.parseJsonLines(
+            listOf(
+                """{"protocolVersion":"0.1.1","runnerVersion":"1.30.0","pid":100,"type":"start","time":0}""",
+                """{"suite":{"id":0,"platform":"vm","path":"test/sample_test.dart"},"type":"suite","time":0}""",
+                """{"test":{"id":2,"name":"sample test passes","suiteID":0,"groupIDs":[],"metadata":{"skip":false,"skipReason":null},"line":10,"column":5,"url":"file:///test/sample_test.dart"},"type":"testStart","time":105}""",
+                """{"testID":2,"result":"success","skipped":false,"hidden":false,"type":"testDone","time":205}""",
+                """{"test":{"id":4,"name":"sample test fails","suiteID":0,"groupIDs":[],"metadata":{"skip":false,"skipReason":null},"line":30,"column":5,"url":"file:///test/sample_test.dart"},"type":"testStart","time":220}""",
+                """{"testID":4,"error":"Expected: <42>","stackTrace":"package:sample/sample_test.dart 32:7 main.<fn>","isFailure":true,"type":"error","time":250}""",
+                """{"testID":4,"result":"failure","skipped":false,"hidden":false,"type":"testDone","time":260}""",
+                """{"success":false,"type":"done","time":300}"""
+            )
+        )
+
+        val htmlFile = File(Files.createTempDirectory("html-report").toFile(), "report.html")
+        val written = FlutterTestReportParser.generateHtmlReport(
+            suites = listOf(TestSuiteReport("pkg/sample/unit", summary, coveragePercent = 81.5)),
+            htmlFile = htmlFile,
+            title = "Sample Suite"
+        )
+
+        assertTrue(written)
+        val html = htmlFile.readText()
+        assertTrue(html.startsWith("<!doctype html>"), "should be a standalone document")
+        assertTrue(html.contains("Sample Suite"))
+        assertTrue(html.contains("pkg/sample/unit"))
+        // The body, not just the header counts.
+        assertTrue(html.contains("sample test passes"), "passing test name missing from the body")
+        assertTrue(html.contains("sample test fails"), "failing test name missing from the body")
+        assertTrue(html.contains("Expected: &lt;42&gt;"), "failure text missing, and escaped")
+        assertTrue(html.contains("81.5% covered"))
+        // No network: nothing to fetch, nothing to run.
+        assertTrue(!html.contains("<script"), "report must not need JavaScript")
+        assertTrue(!html.contains("http://") && !html.contains("https://"), "report must not fetch anything")
+    }
+
+    @Test
+    fun `merged junit wraps one testsuite per suite`() {
+        val one = FlutterTestReportParser.parseJsonLines(
+            listOf(
+                """{"suite":{"id":0,"platform":"vm","path":"test/a_test.dart"},"type":"suite","time":0}""",
+                """{"test":{"id":1,"name":"a passes","suiteID":0,"groupIDs":[],"metadata":{"skip":false,"skipReason":null},"line":1,"column":1,"url":"file:///test/a_test.dart"},"type":"testStart","time":0}""",
+                """{"testID":1,"result":"success","skipped":false,"hidden":false,"type":"testDone","time":10}""",
+                """{"success":true,"type":"done","time":20}"""
+            )
+        )
+        val file = File(Files.createTempDirectory("merged-junit").toFile(), "all.xml")
+
+        FlutterTestReportParser.generateJUnitXml(
+            listOf(
+                TestSuiteReport("pkg/a/unit", one),
+                TestSuiteReport("pkg/b/unit", one)
+            ),
+            file
+        )
+
+        val xml = file.readText()
+        assertTrue(xml.startsWith("<?xml"))
+        assertEquals(1, Regex("<testsuites").findAll(xml).count())
+        assertEquals(2, Regex("<testsuite ").findAll(xml).count())
+        assertTrue(xml.contains("tests=\"2\""), "totals should be summed on the wrapper")
+        assertTrue(xml.contains("pkg/a/unit") && xml.contains("pkg/b/unit"))
+    }
+
+    @Test
+    fun `html report includes coverage table with sortable columns and buttons`() {
+        val coverageFile = File(Files.createTempDirectory("flutter-cov").toFile(), "lcov.info")
+        coverageFile.writeText(
+            """
+            SF:lib/src/a.dart
+            DA:1,1
+            DA:2,0
+            LF:2
+            LH:1
+            end_of_record
+            SF:lib/src/b.dart
+            DA:1,1
+            DA:2,1
+            LF:2
+            LH:2
+            end_of_record
+            """.trimIndent()
+        )
+        val coverage = FlutterTestReportParser.parseLcovCoverage(coverageFile)
+        val summary = FlutterTestReportParser.parseJsonLines(emptyList())
+        val htmlFile = File(Files.createTempDirectory("flutter-html").toFile(), "report.html")
+
+        FlutterTestReportParser.generateHtmlReport(
+            suites = listOf(TestSuiteReport("pkg/unit", summary, coverage = coverage)),
+            htmlFile = htmlFile,
+            title = "Flutter Suite",
+            coverage = coverage,
+            coverageComparator = FlutterCoverageSort.BY_PATH
+        )
+
+        val html = htmlFile.readText()
+        assertTrue(html.contains("Coverage Report"))
+        assertTrue(html.contains("sort-btn"))
+        assertTrue(html.contains("""data-col="file" data-sort="asc""""))
+        assertTrue(html.contains("▲"))
+        assertTrue(html.contains("sortCoverageTable"))
+        assertTrue(html.contains("data-file=\"lib/src/a.dart\""))
+        assertTrue(html.contains("data-file=\"lib/src/b.dart\""))
+        assertTrue(!html.contains("<script src"), "must not fetch external scripts")
+        assertTrue(!html.contains("http://") && !html.contains("https://"), "must not fetch remote resources")
     }
 }

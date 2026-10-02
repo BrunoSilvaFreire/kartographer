@@ -9,4 +9,10 @@ typealias FlutterTestError = DartTestError
 typealias FlutterTestCaseResult = DartTestCaseResult
 typealias FlutterTestRunSummary = DartTestRunSummary
 typealias LcovCoverageSummary = io.kartographer.tasks.dart.LcovCoverageSummary
+typealias LcovFileCoverage = io.kartographer.tasks.dart.LcovFileCoverage
 typealias FlutterTestReportParser = DartTestReportParser
+
+// A typealias does not carry the aliased object's nested types, and the report generators
+// take these directly.
+typealias TestSuiteReport = DartTestReportParser.SuiteReport
+typealias FlutterCoverageSort = DartTestReportParser.CoverageSort
