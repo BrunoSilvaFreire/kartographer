@@ -85,6 +85,7 @@ open class ContainerBuild(name: String) : Task<ContainerBuildInputs, ContainerBu
 
     override fun buildOutputs() = ContainerBuildOutputs()
 
+    // TODO: platforms/namespace/containerClient are read at graph time via directOrNull(); persist them in state (like containerfile/context) so provider-backed values are checked correctly.
     protected open fun localImageExists(context: ExecutionContext, ref: String): Boolean =
         platforms.directOrNull().orEmpty().ifEmpty { listOf("") }.all { platform ->
             runContainerCommand(

@@ -6,6 +6,7 @@ import io.kartographer.core.model.InputSet
 import io.kartographer.core.model.NoOutputs
 import io.kartographer.core.model.Task
 import io.kartographer.dsl.GroupSpec
+// TODO: move this import into the io.kartographer.core block above to keep imports sorted.
 import io.kartographer.core.scheduler.TaskStateStore
 
 data class ImmutableReleaseTagInputs(var version: String) : InputSet()
@@ -22,6 +23,7 @@ class ImmutableReleaseTag(name: String) : Task<ImmutableReleaseTagInputs, NoOutp
     override suspend fun buildInputs(context: ExecutionContext) = ImmutableReleaseTagInputs(version.get())
     override fun buildOutputs() = NoOutputs()
 
+    // TODO: also fail when the tag already exists in the registry; otherwise a source change + push overwrites a published release tag (ContainerPush reruns on digest mismatch).
     override suspend fun execute(
         context: ExecutionContext,
         inputSet: ImmutableReleaseTagInputs,
