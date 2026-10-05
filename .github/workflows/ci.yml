@@ -27,6 +27,11 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Install RPM packaging tools (Linux)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
       - name: Build and assemble the distribution
         shell: bash
         run: |
@@ -35,7 +40,7 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ]; then
             ./gradlew build :dist:distZip :dist:packageMsi -x :daemon:test -x :integration-tests:test
           else
-            ./gradlew build :dist:distZip :dist:distTar :dist:packageDeb
+            ./gradlew build :dist:distZip :dist:distTar :dist:packageDeb :dist:packageRpm
           fi
 
       - name: Verify the native installer was produced
@@ -44,7 +49,7 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ]; then
             ls dist/build/distributions/*.msi
           else
-            ls dist/build/distributions/*.deb
+            ls dist/build/distributions/*.deb dist/build/distributions/*.rpm
           fi
 
       - name: Smoke test the bundle (Linux)
