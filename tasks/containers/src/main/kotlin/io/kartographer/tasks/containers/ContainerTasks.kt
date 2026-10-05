@@ -249,9 +249,12 @@ internal fun buildSourceFingerprint(projectDir: Path, containerfile: String, con
 
 private fun contextFingerprint(context: Path): String = try {
     val root = commandOutput(context, listOf("git", "rev-parse", "--show-toplevel"))?.trim()?.let(Path::of) ?: return ""
-    // A context equal to the repository root relativizes to the empty string, and an empty
-    // pathspec makes `git diff` fail (which would silently degrade this fingerprint to nothing).
-    val relative = root.relativize(context.toAbsolutePath()).toString().ifEmpty { "." }
+    // Ask git for the path from the repository root itself. Relativizing Java's view of the
+    // path against git's can diverge on Windows (short vs. long temp names, drive casing),
+    // which used to make the pathspec match nothing and silently drop the context hash.
+    // A context equal to the repository root yields an empty prefix, and an empty pathspec
+    // makes `git diff` fail, so fall back to ".".
+    val relative = commandOutput(context, listOf("git", "rev-parse", "--show-prefix"))?.trim().orEmpty().ifEmpty { "." }
     val revision = commandOutput(root, listOf("git", "rev-parse", "HEAD")) ?: return ""
     val diff = commandOutput(root, listOf("git", "diff", "HEAD", "--binary", "--", relative)) ?: return ""
     val untracked = commandOutput(root, listOf("git", "ls-files", "--others", "--exclude-standard", "-z", "--", relative))
