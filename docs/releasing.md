@@ -19,9 +19,10 @@ A release run produces, via `.github/workflows/release.yml`:
 | `kartographer-<version>.zip` | linux | `:dist:distZip` |
 | `kartographer-<version>.tar.gz` | linux | `:dist:distTar` |
 | `kartographer_<version>_amd64.deb` | linux | `:dist:packageDeb` |
+| `kartographer-<version>-1.x86_64.rpm` | linux | `:dist:packageRpm` |
 | `kartographer-<version>.msi` | windows | `:dist:packageMsi` |
 
-The `.deb` and `.msi` are self-contained (jpackage bundles a trimmed Java runtime). The
+The `.deb`, `.rpm` and `.msi` are self-contained (jpackage bundles a trimmed Java runtime). The
 `.zip`/`.tar.gz` archives require Java 21 on the target machine. See the README
 [Installation](../README.md#installation) section for end-user install commands.
 
@@ -122,17 +123,21 @@ Running the packaging tasks on a workstation needs the same tools the CI runners
 | Task | Tool | Notes |
 |---|---|---|
 | `:dist:distZip`, `:dist:distTar` | JDK 21 | No extra tooling. |
-| `:dist:packageDeb` | `jpackage` + `dpkg`/`fakeroot` | `jpackage` ships with JDK 21. Linux only. |
+| `:dist:packageDeb` | `jpackage` + `dpkg`/`fakeroot` | `jpackage` ships with JDK 21. Debian/Ubuntu. |
+| `:dist:packageRpm` | `jpackage` + `rpm-build` | Fedora/RHEL; `rpmbuild` provides the RPM tooling. |
 | `:dist:packageMsi` | `jpackage` + WiX Toolset | Windows only; jpackage drives WiX. |
 
 The package tasks are host-gated in `dist/build.gradle.kts`
-(`onlyIf { !isWindowsHost }` for deb, `onlyIf { isWindowsHost }` for msi), so calling the wrong
-one on a host is skipped rather than failing. A local dry run:
+(`onlyIf { !isWindowsHost }` for deb/rpm, `onlyIf { isWindowsHost }` for msi), so calling the
+wrong one on a host is skipped rather than failing. A local dry run:
 
 ```bash
-./gradlew :dist:distZip :dist:distTar :dist:packageDeb -Pversion=0.1.0
+./gradlew :dist:distZip :dist:distTar :dist:packageDeb :dist:packageRpm -Pversion=0.1.0
 ls dist/build/distributions/
 ```
+
+On Debian/Ubuntu, install the RPM tooling first: `sudo apt-get install -y rpm`. On Fedora/RHEL,
+install `rpm-build` and `dpkg` (for the deb task) if you want to build both on one host.
 
 ## Troubleshooting
 

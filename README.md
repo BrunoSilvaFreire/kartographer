@@ -4,13 +4,20 @@ Kartographer is a topology-aware Directed Acyclic Graph (DAG) task orchestrator.
 
 ## Installation
 
-The `.deb` and `.msi` packages are self-contained (they bundle a trimmed Java runtime).
+The `.deb`, `.rpm` and `.msi` packages are self-contained (they bundle a trimmed Java runtime).
 The `.zip`/`.tar.gz` archives require **Java 21** on the system — no Gradle or Kotlin needed.
 
 ### Debian / Ubuntu
 
 ```bash
 sudo apt install ./kartographer_0.1.0_amd64.deb
+kartographer --help
+```
+
+### Fedora / RHEL
+
+```bash
+sudo dnf install ./kartographer-0.1.0-1.x86_64.rpm
 kartographer --help
 ```
 
@@ -49,6 +56,7 @@ Every archive contains both launchers in `bin/`: `kartographer` (CLI) and
 ./gradlew :dist:distZip          # default version 0.1.0-SNAPSHOT
 ./gradlew :dist:distZip -Pversion=0.1.0
 ./gradlew :dist:packageDeb       # Linux, needs jpackage + dpkg
+./gradlew :dist:packageRpm       # Fedora/RHEL, needs jpackage + rpmbuild
 ./gradlew :dist:packageMsi       # Windows, needs jpackage + WiX
 ```
 
