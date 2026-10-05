@@ -39,10 +39,15 @@ val startScriptsDir = layout.buildDirectory.dir("startScripts")
 // The CLI (via Mosaic) and the daemon would otherwise resolve different coroutines versions,
 // leaving one launcher pointing at a jar the shared lib/ never contains. The bundle has to
 // resolve every shared dependency to exactly one version.
+// JNA is shared too: the CLI needs it transitively through Mordant's terminal detection, and
+// the daemon now declares it for the native task-log sinks. Without pinning, the CLI start
+// script references the older transitive jar while lib/ only holds the daemon's version.
 configurations.all {
     resolutionStrategy.force(
         "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2",
-        "org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.10.2"
+        "org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.10.2",
+        "net.java.dev.jna:jna:5.17.0",
+        "net.java.dev.jna:jna-platform:5.17.0"
     )
 }
 
@@ -170,6 +175,28 @@ val packageDeb = tasks.register<Exec>("packageDeb") {
     commandLine(
         "jpackage",
         "--type", "deb",
+        "--input", jpackageInput.get().asFile.absolutePath,
+        "--main-jar", "kartographer-cli.jar",
+        "--main-class", "io.kartographer.cli.MainKt",
+        "--add-launcher", "kartographer-daemon=${daemonLauncherFile.get().asFile.absolutePath}",
+        "--name", "kartographer",
+        "--app-version", jpackageVersion.get(),
+        "--linux-package-name", "kartographer",
+        "--linux-shortcut",
+        "--dest", dest.absolutePath,
+    )
+}
+
+val packageRpm = tasks.register<Exec>("packageRpm") {
+    group = "distribution"
+    description = "Build a self-contained RPM package for Fedora/RHEL (Linux only; needs jpackage + rpm-build)."
+    onlyIf { !isWindowsHost }
+    dependsOn(stageJpackageInput, writeDaemonLauncher)
+    val dest = layout.buildDirectory.dir("distributions").get().asFile
+    doFirst { dest.mkdirs() }
+    commandLine(
+        "jpackage",
+        "--type", "rpm",
         "--input", jpackageInput.get().asFile.absolutePath,
         "--main-jar", "kartographer-cli.jar",
         "--main-class", "io.kartographer.cli.MainKt",
