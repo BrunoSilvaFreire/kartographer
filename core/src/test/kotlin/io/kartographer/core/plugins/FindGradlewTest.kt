@@ -2,6 +2,7 @@ package io.kartographer.core.plugins
 
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.condition.EnabledOnOs
 import org.junit.jupiter.api.condition.OS
@@ -63,6 +64,44 @@ class FindGradlewTest {
         assertEquals(wrapper.absoluteFile, found)
     }
 
+    @Test
+    fun `resolution init script maps the versionless plugin to the running bundle version`() {
+        val libDir = File(tempDir(), "lib").apply { mkdirs() }
+        val coreJar = File(libDir, "core-3.4.5.jar")
+        JarFileFixture.write(coreJar, "3.4.5")
+        val previousClasspath = System.getProperty("java.class.path")
+        try {
+            System.setProperty("java.class.path", coreJar.absolutePath)
+            val script = PluginLoader.pluginResolutionInitScriptForTest() ?: error("No init script created")
+            val text = script.readText()
+            assertTrue(text.contains("useVersion(\"3.4.5\")"))
+            assertTrue(text.contains("mavenLocal()"))
+            assertTrue(text.contains("gradlePluginPortal()"))
+            script.delete()
+        } finally {
+            if (previousClasspath == null) System.clearProperty("java.class.path")
+            else System.setProperty("java.class.path", previousClasspath)
+        }
+    }
+
+    @Test
+    fun `resolution init script recovers the version from a release core jar name`() {
+        // A release bundle's core jar carries no Implementation-Version; only its name does.
+        val libDir = File(tempDir(), "lib").apply { mkdirs() }
+        val coreJar = File(libDir, "core-0.1.0.jar")
+        JarFileFixture.write(coreJar, version = null)
+        val previousClasspath = System.getProperty("java.class.path")
+        try {
+            System.setProperty("java.class.path", coreJar.absolutePath)
+            val script = PluginLoader.pluginResolutionInitScriptForTest() ?: error("No init script created")
+            assertTrue(script.readText().contains("useVersion(\"0.1.0\")"))
+            script.delete()
+        } finally {
+            if (previousClasspath == null) System.clearProperty("java.class.path")
+            else System.setProperty("java.class.path", previousClasspath)
+        }
+    }
+
     private fun tempDir(): File =
         Files.createTempDirectory("findGradlew").toFile().apply { deleteOnExit() }
 
@@ -71,4 +110,16 @@ class FindGradlewTest {
             writeText("#!/bin/sh\n")
             setExecutable(true)
         }
+
+    private object JarFileFixture {
+        fun write(file: File, version: String?) {
+            val manifest = java.util.jar.Manifest().apply {
+                mainAttributes[java.util.jar.Attributes.Name.MANIFEST_VERSION] = "1.0"
+                if (version != null) {
+                    mainAttributes.putValue("Implementation-Version", version)
+                }
+            }
+            java.util.jar.JarOutputStream(file.outputStream(), manifest).use { }
+        }
+    }
 }

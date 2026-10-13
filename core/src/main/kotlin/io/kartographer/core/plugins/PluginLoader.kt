@@ -5,6 +5,8 @@ import org.slf4j.LoggerFactory
 import java.io.Closeable
 import java.io.File
 import java.io.IOException
+import java.nio.file.Files
+import java.util.jar.JarFile
 import java.net.URL
 import java.net.URLClassLoader
 import java.util.ServiceLoader
@@ -270,26 +272,103 @@ object PluginLoader {
     }
 
     fun compileLocalPlugin(localPluginDir: File, gradlewFile: File): Boolean {
+        val initScript = createPluginResolutionInitScript() ?: run {
+            System.err.println("Unable to locate the running Kartographer plugin artifacts")
+            return false
+        }
         try {
             val pb = ProcessBuilder(
                 gradlewFile.absolutePath,
                 "-p", localPluginDir.absolutePath,
+                "--init-script", initScript.absolutePath,
                 "jar"
             )
             pb.redirectErrorStream(true)
             val process = pb.start()
             val output = process.inputStream.bufferedReader().readText()
             val exitCode = process.waitFor()
+            initScript.delete()
             if (exitCode != 0) {
                 System.err.println("Failed to compile local plugin inside $localPluginDir:\n$output")
                 return false
             }
             return true
         } catch (e: Exception) {
+            initScript.delete()
             System.err.println("Exception compiling local plugin: ${e.localizedMessage}")
             e.printStackTrace()
             return false
         }
+    }
+
+    /**
+     * Resolve the versionless plugin marker and its implementation from the same Kartographer
+     * build the daemon is running. Release launchers expose lib/ as java.class.path; development
+     * runs resolve from mavenLocal, where publishToMavenLocal installs the marker metadata.
+     */
+    internal fun pluginResolutionInitScriptForTest(): File? = createPluginResolutionInitScript()
+
+    private fun createPluginResolutionInitScript(): File? {
+        val entries = (System.getProperty("java.class.path") ?: "")
+            .split(File.pathSeparator)
+            .filter { it.isNotBlank() }
+            .map(::File)
+        val pluginJar = entries.firstOrNull {
+            it.isFile && it.name.startsWith("kartographer-plugin-") && it.name.endsWith(".jar")
+        }
+        // Only use the core artifact from the launcher's exposed classpath. In a source
+        // run that entry is a classes directory; release start scripts expose the packaged jar.
+        val coreJar = entries.firstOrNull {
+            it.isFile && it.parentFile?.name == "lib" &&
+                it.name.startsWith("core-") && it.name.endsWith(".jar")
+        }
+        // The plugin jar is normally absent: neither the daemon nor the release bundle depends
+        // on it. Fall back to core, whose versioned file name still carries the bundle version
+        // because the API jar's manifest does not.
+        val version = artifactVersion(pluginJar, "kartographer-plugin-")
+            ?: artifactVersion(coreJar, "core-")
+            ?: "0.1.0-SNAPSHOT"
+
+        val init = Files.createTempFile("kartographer-plugin-resolution-", ".gradle").toFile()
+        // The bundle directory is a flat runtime classpath, not a Maven repository. Its
+        // artifacts are versioned and the source build publishes matching artifacts locally.
+        init.writeText(
+            """
+            settingsEvaluated { settings ->
+                settings.pluginManagement.resolutionStrategy.eachPlugin {
+                    if (requested.id.id == "io.kartographer.plugin" && requested.version == null) {
+                        useVersion("$version")
+                    }
+                }
+                // Source builds install these publications here. A release bundle exposes a
+                // flat lib/ classpath, so its matching Maven publication must be published.
+                settings.pluginManagement.repositories {
+                    mavenLocal()
+                    gradlePluginPortal()
+                    mavenCentral()
+                }
+            }
+            """.trimIndent()
+        )
+        return init
+    }
+
+    /**
+     * Resolves the version of a Kartographer artifact on the running classpath. The manifest
+     * attribute is authoritative; a release bundle's `core` jar is unversioned in its manifest,
+     * so the version is recovered from the `<artifactId>-<version>.jar` file name instead.
+     */
+    private fun artifactVersion(jar: File?, artifactPrefix: String): String? {
+        if (jar == null) return null
+        jarManifestVersion(jar)?.let { return it }
+        if (!jar.name.startsWith(artifactPrefix) || !jar.name.endsWith(".jar")) return null
+        return jar.name.removePrefix(artifactPrefix).removeSuffix(".jar").ifBlank { null }
+    }
+
+    private fun jarManifestVersion(jar: File): String? = try {
+        JarFile(jar).use { it.manifest?.mainAttributes?.getValue("Implementation-Version") }
+    } catch (_: Exception) {
+        null
     }
 
     fun findLocalPluginJar(localPluginDir: File): File? {

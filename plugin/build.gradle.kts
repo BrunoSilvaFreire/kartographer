@@ -28,12 +28,16 @@ gradlePlugin {
     }
 }
 
+tasks.named<Jar>("jar") {
+    manifest.attributes["Implementation-Version"] = project.version.toString()
+}
+
 publishing {
     publications {
         create<MavenPublication>("pluginMaven") {
             groupId = "io.kartographer"
             artifactId = "kartographer-plugin"
-            version = "0.1.0-SNAPSHOT"
+            version = project.version.toString()
         }
     }
 }

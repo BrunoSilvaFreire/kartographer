@@ -3,63 +3,65 @@ package io.kartographer.plugin
 import org.gradle.api.Project
 import javax.inject.Inject
 
-open class KartoDependenciesExtension @Inject constructor(private val project: Project) {
-    private val version = "0.1.0-SNAPSHOT"
+open class KartoDependenciesExtension @Inject constructor(
+    private val project: Project,
+    private val version: String
+) {
 
     fun python() {
-        project.dependencies.add("implementation", "io.kartographer:python:$version")
+        project.dependencies.add("compileOnly", "io.kartographer:python:$version")
     }
 
     fun apt() {
-        project.dependencies.add("implementation", "io.kartographer:apt:$version")
+        project.dependencies.add("compileOnly", "io.kartographer:apt:$version")
     }
 
     fun containers() {
-        project.dependencies.add("implementation", "io.kartographer:containers:$version")
+        project.dependencies.add("compileOnly", "io.kartographer:containers:$version")
     }
 
     fun go() {
-        project.dependencies.add("implementation", "io.kartographer:go:$version")
+        project.dependencies.add("compileOnly", "io.kartographer:go:$version")
     }
 
     fun npm() {
-        project.dependencies.add("implementation", "io.kartographer:npm:$version")
+        project.dependencies.add("compileOnly", "io.kartographer:npm:$version")
     }
 
     fun gradle() {
-        project.dependencies.add("implementation", "io.kartographer:gradle:$version")
+        project.dependencies.add("compileOnly", "io.kartographer:gradle:$version")
     }
 
     fun proto() {
-        project.dependencies.add("implementation", "io.kartographer:proto:$version")
+        project.dependencies.add("compileOnly", "io.kartographer:proto:$version")
     }
 
     fun flutter() {
-        project.dependencies.add("implementation", "io.kartographer:flutter:$version")
+        project.dependencies.add("compileOnly", "io.kartographer:flutter:$version")
     }
 
     fun dart() {
-        project.dependencies.add("implementation", "io.kartographer:dart:$version")
+        project.dependencies.add("compileOnly", "io.kartographer:dart:$version")
     }
 
     fun kubernetes() {
-        project.dependencies.add("implementation", "io.kartographer:kubernetes:$version")
+        project.dependencies.add("compileOnly", "io.kartographer:kubernetes:$version")
     }
 
     fun pulumi() {
-        project.dependencies.add("implementation", "io.kartographer:pulumi:$version")
+        project.dependencies.add("compileOnly", "io.kartographer:pulumi:$version")
     }
 
     fun ansible() {
-        project.dependencies.add("implementation", "io.kartographer:ansible:$version")
+        project.dependencies.add("compileOnly", "io.kartographer:ansible:$version")
     }
 
     fun buf() {
-        project.dependencies.add("implementation", "io.kartographer:buf:$version")
+        project.dependencies.add("compileOnly", "io.kartographer:buf:$version")
     }
 
     fun github() {
-        project.dependencies.add("implementation", "io.kartographer:github:$version")
+        project.dependencies.add("compileOnly", "io.kartographer:github:$version")
     }
 
     fun api(dependencyNotation: String) {
