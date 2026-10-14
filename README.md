@@ -10,39 +10,39 @@ The `.zip`/`.tar.gz` archives require **Java 21** on the system — no Gradle or
 ### Debian / Ubuntu
 
 ```bash
-sudo apt install ./kartographer_0.1.0_amd64.deb
+sudo apt install ./kartographer_0.2.0_amd64.deb
 kartographer --help
 ```
 
 ### Fedora / RHEL
 
 ```bash
-sudo dnf install ./kartographer-0.1.0-1.x86_64.rpm
+sudo dnf install ./kartographer-0.2.0-1.x86_64.rpm
 kartographer --help
 ```
 
 ### Windows (MSI)
 
-Download `kartographer-0.1.0.msi` from the release and run it, or from PowerShell:
+Download `kartographer-0.2.0.msi` from the release and run it, or from PowerShell:
 
 ```powershell
-msiexec /i kartographer-0.1.0.msi
+msiexec /i kartographer-0.2.0.msi
 kartographer.bat --help
 ```
 
 ### Linux / macOS (archive)
 
 ```bash
-unzip kartographer-0.1.0.zip
-export PATH="$PWD/kartographer-0.1.0/bin:$PATH"
+unzip kartographer-0.2.0.zip
+export PATH="$PWD/kartographer-0.2.0/bin:$PATH"
 kartographer --help
 ```
 
 ### Windows (archive)
 
 ```powershell
-Expand-Archive kartographer-0.1.0.zip -DestinationPath .
-$env:PATH += ";$PWD\kartographer-0.1.0\bin"
+Expand-Archive kartographer-0.2.0.zip -DestinationPath .
+$env:PATH += ";$PWD\kartographer-0.2.0\bin"
 kartographer.bat --help
 ```
 
@@ -54,7 +54,7 @@ Every archive contains both launchers in `bin/`: `kartographer` (CLI) and
 
 ```bash
 ./gradlew :dist:distZip          # default version 0.1.0-SNAPSHOT
-./gradlew :dist:distZip -Pversion=0.1.0
+./gradlew :dist:distZip -Pversion=0.2.0
 ./gradlew :dist:packageDeb       # Linux, needs jpackage + dpkg
 ./gradlew :dist:packageRpm       # Fedora/RHEL, needs jpackage + rpmbuild
 ./gradlew :dist:packageMsi       # Windows, needs jpackage + WiX
