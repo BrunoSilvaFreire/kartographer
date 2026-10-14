@@ -57,6 +57,12 @@ private fun context(
 class GitHubTaskPoliciesTest {
 
     @Test
+    fun `variable changes include missing and differing values only`() {
+        assertEquals(mapOf("B" to "new", "C" to "value"), variableChanges(mapOf("A" to "same", "B" to "old"), mapOf("A" to "same", "B" to "new", "C" to "value")))
+        assertEquals(mapOf("A" to "value"), parseVariables("""[{"name":"A","value":"value"}]"""))
+    }
+
+    @Test
     fun `parses rulesets from the gh api payload`() {
         val rulesets = parseRulesets("""[{"id":1,"name":"main-status-checks"},{"id":2,"name":"other"}]""")
         assertEquals(listOf(RepoRuleset(1, "main-status-checks"), RepoRuleset(2, "other")), rulesets)
