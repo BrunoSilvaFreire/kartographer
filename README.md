@@ -83,6 +83,10 @@ Kartographer models these constraints as first-class concepts via **Topology Req
 - **Topology-Aware Placement**: Tasks declare placement constraints that are matched against worker capabilities before execution.
 - **Local Process Execution**: Tasks can run shell commands natively, capturing stderr/stdout, custom working directories, and custom environment variables.
 
+## Google Cloud Tasks
+
+The `tasks:gcp` module provides `gcloud`-backed preflight, resource ensure, and IAM binding tasks. They require the daemon's `gcloud` capability and use read/compare/create behavior: matching resources are reused, mismatches fail with a conflict, and `--dry-run` reports planned changes without applying them. Install and authenticate the Google Cloud CLI on the worker that runs these tasks.
+
 ---
 
 ## MVP CLI Usage

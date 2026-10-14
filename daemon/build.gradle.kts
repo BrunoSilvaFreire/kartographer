@@ -29,6 +29,7 @@ dependencies {
     implementation(project(":tasks:kubernetes"))
     implementation(project(":tasks:buf"))
     implementation(project(":tasks:github"))
+    implementation(project(":tasks:gcp"))
 
     // Coroutines and gRPC
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0")

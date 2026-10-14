@@ -458,7 +458,7 @@ class RunSession(
 object DaemonCapabilities {
     val ALL = setOf(
         "local-exec", "ansible", "apt", "buf", "dart", "docker", "flutter", "gh", "git", "go",
-        "gradle", "kubectl", "node", "protoc", "pulumi", "python"
+        "gcloud", "gradle", "kubectl", "node", "protoc", "pulumi", "python"
     )
 }
 
