@@ -63,6 +63,15 @@ Every archive contains both launchers in `bin/`: `kartographer` (CLI) and
 `./bootstrap.sh` remains the developer path: it builds `installDist` and symlinks `kartographer`
 and `kartographer-daemon` into `~/.local/bin`.
 
+### Agent skills
+
+The [`docs/skills/`](docs/skills) directory holds the Kartographer skill guides used by coding
+agents working in this repository — concepts, repository guide, task best practices,
+daemon/execution, testing/CI, and release/packaging. Each skill is a `SKILL.md` in its own
+directory; start with
+[`docs/skills/kartographer-repo-guide/SKILL.md`](docs/skills/kartographer-repo-guide/SKILL.md) to get
+oriented.
+
 
 
 ## Why Topology-Aware DAG Orchestration?
