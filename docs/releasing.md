@@ -31,6 +31,8 @@ The `.deb`, `.rpm` and `.msi` are self-contained (jpackage bundles a trimmed Jav
 The version is taken from the tag, so the tag **is** the version. For a tag `vX.Y.Z`,
 `release.yml` builds with `-Pversion=X.Y.Z`.
 
+<!-- TODO: Include RPM in this walkthrough and count all five assets so the release checklist matches the workflow. -->
+
 1. Make sure `master` is green in CI (ubuntu + windows) and carries the release workflow
    (`.github/workflows/release.yml`), the `dist` module, and the install README.
 2. Create and push an annotated tag on the commit to release:
@@ -110,6 +112,7 @@ gh run list --repo BrunoSilvaFreire/kartographer-sandbox
 gh run watch <run-id> --repo BrunoSilvaFreire/kartographer-sandbox
 ```
 
+<!-- TODO: Include RPM in the sandbox evidence so the listed artifacts match the tested release. -->
 A green run here proves the zip/tar.gz/deb/msi build and the `gh release create` step before a
 public `vX.Y.Z` is cut. Candidate tags use a `-rcN` suffix, which jpackage strips for the
 numeric `--app-version` (`v0.1.0-rc2` → app version `0.1.0`).
@@ -119,6 +122,8 @@ numeric `--app-version` (`v0.1.0-rc2` → app version `0.1.0`).
 ## Local installer tooling
 
 Running the packaging tasks on a workstation needs the same tools the CI runners use:
+
+<!-- TODO: Close the WiX Toolset code span so the installer tooling table renders correctly. -->
 
 | Task | Tool | Notes |
 |---|---|---|
