@@ -1,13 +1,13 @@
 package io.kartographer.tasks.github
 
-import io.kartographer.core.model.BashSpec
+import io.kartographer.core.exec.CommandResult
+import io.kartographer.core.exec.report
+import io.kartographer.core.exec.runCommand
 import io.kartographer.core.model.ExecutionContext
-import io.kartographer.core.model.ExecutionEvent
 import io.kartographer.core.model.ExecutionResult
 import io.kartographer.core.model.InputSet
 import io.kartographer.core.model.NoOutputs
 import io.kartographer.core.model.Task
-import io.kartographer.core.model.executeSpec
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -53,44 +53,6 @@ internal fun decideRulesetAction(existing: List<RepoRuleset>, desiredName: Strin
     existing.firstOrNull { it.name == desiredName }
         ?.let { RulesetAction.Update(it.id) }
         ?: RulesetAction.Create
-
-internal class CommandResult(val exitCode: Int, val stdout: String, val stderr: String) {
-    val combined: String get() = listOf(stdout, stderr).filter { it.isNotBlank() }.joinToString("\n")
-    val ok: Boolean get() = exitCode == 0
-}
-
-/**
- * Runs one command through the session's execution environment, capturing stdout and stderr.
- *
- * Argument lists only — deliberately never `bash -c` — so the same code works under `cmd.exe`.
- */
-internal suspend fun ExecutionContext.runCommand(
-    executable: String,
-    arguments: List<String>,
-    workDir: String? = null
-): CommandResult {
-    val out = StringBuilder()
-    val err = StringBuilder()
-    val spec = BashSpec().apply {
-        command(executable)
-        args(arguments)
-        this.workingDir = workDir
-        onStdoutLine = { out.appendLine(it) }
-        onStderrLine = { err.appendLine(it) }
-    }
-    val result = executeSpec(spec)
-    val code = when (result) {
-        is ExecutionResult.Failure -> result.exitCode ?: 1
-        else -> 0
-    }
-    return CommandResult(code, out.toString().trimEnd(), err.toString().trimEnd())
-}
-
-/** Surfaces a line to the run's observer so `--dry-run` and progress are visible to the CLI. */
-internal fun ExecutionContext.report(line: String) {
-    val node = executionNode ?: task ?: return
-    observer?.onEvent(ExecutionEvent.TaskOutput(node, line, isError = false))
-}
 
 data class GitHubRepoSettingsInputs(
     var repo: String,
